@@ -6,7 +6,9 @@
 wandb/settings
 
 # --- data: KAIST is ~35GB, never in git ---
-data/
+# NB: must be `data/*`, not `data/` — git will not re-include a file whose parent
+# directory is excluded, so the negation below is silently dead with `data/`.
+data/*
 !data/README.md
 datasets/
 
