@@ -4,6 +4,10 @@ version = "0.1.0"
 description = "Middle-fusion RGB-thermal detection: an empirical architecture study on KAIST"
 requires-python = ">=3.11,<3.13"
 dependencies = [
+    # Blackwell (sm_120) needs CUDA 12.8+ wheels; anything older dies at runtime with
+    # "no kernel image is available for execution on the device". Pinned via the index below.
+    "torch>=2.11",
+    "torchvision>=0.26",
     "numpy>=1.26",
     "opencv-python>=4.10",
     "pillow>=10.0",
@@ -31,3 +35,14 @@ packages = ["src/prism"]
 
 [tool.ruff]
 line-length = 100
+
+# Pull torch/torchvision from the CUDA 12.8 index, not PyPI. Without this, a fresh
+# `uv pip install -e .` silently grabs a default-CUDA wheel that cannot run on sm_120.
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
