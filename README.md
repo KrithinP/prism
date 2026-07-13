@@ -16,10 +16,22 @@ Phase 0 — setup and literature. Nothing trained yet.
 ## The dataset
 
 [KAIST Multispectral Pedestrian Detection Benchmark](https://soonminhwang.github.io/rgbt-ped-detection/)
-(Hwang et al., CVPR 2015). Captured through a **beam splitter**: RGB and LWIR share an optical
-axis and are hardware-synced. That matters — KAIST has *no* parallax, FOV mismatch, or frame-rate
-skew. It is the clean control. Real rigs are not like this, so PRISM injects misalignment
-deliberately (see `docs/`) rather than pretending the benchmark already has it.
+(Hwang et al., CVPR 2015). 95k color-thermal pairs, 640×480, 20 Hz, captured from a vehicle
+through a **beam splitter**.
+
+The alignment story is the whole reason this project is interesting, and it has two halves:
+
+- **By design, KAIST is aligned.** The beam splitter makes the cameras co-axial (no large-baseline
+  parallax) and the pairs are hardware-captured at a single 20 Hz rate (no frame-rate skew).
+- **In practice, it is only *weakly* aligned.** AR-CNN (Zhang et al., ICCV 2019) showed the same
+  pedestrian occupies different pixel positions in RGB vs thermal, and released **KAIST-Paired**
+  per-modality annotations to quantify it. Essentially the entire published literature trains
+  through this residual shift without mentioning it.
+
+So PRISM treats misalignment robustness as a first-class ablation axis, with two instruments:
+**measure** the shift that is already in the data (KAIST-Paired), and **inject** controlled extra
+shift/scale/temporal skew to sweep the axis. Fusion operators that assume exact pixel
+correspondence should degrade; ones that pool or gate should not.
 
 Evaluation is **log-average miss rate (MR⁻²)** over FPPI ∈ [10⁻², 10⁰] on the *reasonable*
 subset, reported All / Day / Night — not mAP. Uses the sanitized train + improved test

@@ -27,10 +27,20 @@ Target: **report + reproducible repo in 4–6 weeks** (started 2026-07-13).
 
 ## The facts that will bite you
 
-- **KAIST is beam-splitter aligned.** RGB and LWIR share an optical axis, hardware-synced, 20 fps.
-  There is no parallax, no FOV mismatch, no frame-rate skew in this data. The 120fps/60fps +
-  parallax problem is the *Apollyon rig's*, not the benchmark's. PRISM therefore **injects**
-  misalignment (spatial shift/scale, temporal skew) as a deliberate ablation axis.
+- **KAIST is beam-splitter aligned *by design*, but only weakly aligned *in practice*.** Get this
+  distinction right; an earlier version of this file got it wrong.
+  - *By design:* Hwang et al. used a beam splitter, so the two cameras are co-axial — there is no
+    large-baseline parallax — and pairs are hardware-captured at 20 Hz, so there is no frame-rate
+    skew. Krithin's 120fps-RGB / 60fps-thermal problem and his parallax-from-physical-separation
+    problem are **the Apollyon rig's, not the benchmark's**.
+  - *In practice:* the pairs are **not strictly aligned**. AR-CNN (Zhang et al., ICCV 2019) showed
+    the same pedestrian sits at different pixel positions in RGB vs thermal, and released
+    **KAIST-Paired** per-modality annotations to quantify it. The whole field trains through this
+    residual shift silently.
+  - *Consequence for PRISM:* misalignment robustness is a real axis with **two** instruments —
+    **measure** the shift that is already there (KAIST-Paired), and **inject** controlled extra
+    shift/scale/temporal skew to sweep the axis under control. Injection alone would have been
+    simulating a problem the data already has.
 - **The metric is MR⁻²**, log-average miss rate over FPPI ∈ [10⁻², 10⁰] on the *reasonable*
   subset, split All / Day / Night. Lower is better. It is **not** mAP.
 - **Annotations matter more than the model.** Use the sanitized train + improved test annotation
