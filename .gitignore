@@ -1,0 +1,45 @@
+# --- secrets: nothing real, ever, in a committed file ---
+.env
+.env.local
+*.key
+*.pem
+wandb/settings
+
+# --- data: KAIST is ~35GB, never in git ---
+data/
+!data/README.md
+datasets/
+
+# --- experiment output ---
+outputs/
+runs/
+checkpoints/
+*.pth
+*.pt
+*.onnx
+*.engine
+wandb/
+lightning_logs/
+
+# --- python ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+build/
+dist/
+
+# --- latex (textbook build artifacts) ---
+docs/textbook/**/*.aux
+docs/textbook/**/*.log
+docs/textbook/**/*.out
+docs/textbook/**/*.toc
+docs/textbook/**/*.synctex.gz
+docs/textbook/**/*.fdb_latexmk
+docs/textbook/**/*.fls
+
+# --- os ---
+.DS_Store
