@@ -46,3 +46,4 @@ docs/textbook/**/*.fls
 # --- os ---
 .DS_Store
 docs/*.zip
+outputs/

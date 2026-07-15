@@ -102,11 +102,35 @@ label: the separation is the seam along which the whole headline experiment late
 
 The thinnest end-to-end slice for a detection project is one sample, drawn and looked at:
 image in $\rightarrow$ boxes parsed $\rightarrow$ boxes drawn on \emph{both} modalities
-$\rightarrow$ a human confirms they land on people. That is the build for this chapter, and
-its exit check is deliberately visual and slightly subversive: \emph{find five pairs where
-the RGB and thermal boxes do not perfectly coincide}. On beam-split KAIST they should nearly
-coincide --- but ``nearly'' is the entire premise of the project (Zhang et al.'s KAIST-Paired
-work exists because they do not \emph{exactly} coincide). Seeing the residual shift with your
-own eyes is the first evidence that the misalignment axis is real and not invented.
+$\rightarrow$ a human confirms they land on people. That is the build for this chapter, and it
+passes: the boxes land on pedestrians in both streams.
+
+The original draft of this section set a second, more ambitious exit check --- \emph{find five
+pairs where the RGB and thermal boxes visibly fail to coincide}, to see the residual
+misalignment by eye. Building it taught the opposite lesson, and it is worth recording exactly
+because the first instinct was wrong.
+
+\begin{lesson}
+The residual RGB--thermal misalignment on KAIST (a few pixels on a $\sim$90\,px body,
+$3$--$5\%$) is below what the naked eye reliably resolves --- and on a \emph{night} sequence
+the point collapses entirely, because RGB can barely see the pedestrian at all, so there is no
+shared object whose edges you could compare between the two modalities. We confirmed this with
+a false-colour overlay (thermal in red, RGB in cyan): the pedestrians came out pure red
+(thermal-only) and the painted crosswalk pure cyan (RGB-only). That image is a vivid lesson in
+\emph{modality complementarity} --- each sensor sees what the other cannot --- but it is not a
+misalignment measurement, and pretending otherwise would be exactly the kind of
+see-what-you-expect error the whole project is built to avoid.
+\end{lesson}
+
+The honest conclusion reframes the misalignment axis and, in doing so, justifies the project's
+central design choice. Misalignment on this benchmark cannot be \emph{eyeballed}; it must be
+\emph{measured} --- either against per-modality boxes (Zhang et al.'s KAIST-Paired annotations,
+which exist precisely because the shift is real but small) or, as we will do, by \emph{injecting}
+a known shift and measuring how each fusion operator degrades (the Phase~4 headline). We did not
+choose ``inject and measure'' over ``inspect'' for convenience; we chose it because inspection
+demonstrably does not work here. The revised exit check for this chapter is therefore the one we
+actually passed: the loader is correct, the boxes land on people in both modalities, and the
+false-colour overlay makes the complementarity of the two sensors --- the reason fusion exists
+at all --- plainly visible.
 
 \end{document}
