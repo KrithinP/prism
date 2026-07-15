@@ -1,14 +1,23 @@
-\documentclass[11pt]{book}
-
-% ---------------------------------------------------------------------------
-% PRISM: the living textbook.
-% Written alongside the project (working agreement R3): each chapter lands in the
-% same session the thing it documents happens -- a result, a failure and its
-% lesson, a decision, a first success. Krithin reads the relevant chapter as the
-% R2 theory gate before building that phase.
+% ===========================================================================
+% PRISM: the living textbook  (master file)
 %
-% Build:  latexmk -pdf main.tex     (needs texlive; not yet installed)
-% ---------------------------------------------------------------------------
+% Written alongside the project (working agreement R3): each chapter lands in the
+% same session the thing it documents happens. Krithin reads the relevant chapter
+% as the R2 theory gate before building that phase.
+%
+% OVERLEAF / BUILD INSTRUCTIONS
+%   This project uses the `subfiles` package, so:
+%     * Compiling main.tex builds the whole book.
+%     * Compiling ANY chapter file in chapters/ builds THAT chapter on its own,
+%       pulling this file's preamble automatically. Nothing to copy, nothing to
+%       duplicate.
+%   To use on Overleaf: zip the entire docs/textbook/ folder and upload it, then
+%   set main.tex as the main document (Menu -> Main document). Each chapter still
+%   compiles by itself if you open it and hit Recompile.
+%
+%   All packages below ship with Overleaf and TeX Live by default.
+% ===========================================================================
+\documentclass[11pt]{report}
 
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
@@ -18,10 +27,12 @@
 \usepackage{booktabs}
 \usepackage{listings}
 \usepackage{xcolor}
-\usepackage[hidelinks]{hyperref}
 \usepackage{geometry}
+\usepackage[hidelinks]{hyperref}
+\usepackage{subfiles}          % <-- lets each chapter compile standalone too
 \geometry{a4paper, margin=1in}
 
+% --- code listing style (language set per-listing, so any file type is safe) ---
 \definecolor{codebg}{gray}{0.96}
 \lstset{
   basicstyle=\ttfamily\small,
@@ -32,11 +43,11 @@
   numberstyle=\tiny\color{gray},
   keywordstyle=\color{blue!70!black},
   commentstyle=\color{green!40!black},
+  stringstyle=\color{red!60!black},
   showstringspaces=false,
-  language=Python,
 }
 
-% A recurring box for the lessons that were learned the hard way.
+% --- a recurring box for the lessons learned the hard way ---
 \newenvironment{lesson}{\par\medskip\noindent\textbf{Lesson learned.}\itshape}{\par\medskip}
 
 \title{\textbf{PRISM}\\[0.5em]\large A Ground-Up Course in Multispectral Object Detection,\\ Written While Building One}
@@ -47,7 +58,7 @@
 \maketitle
 \tableofcontents
 
-% Chapters are included as they are written, in build order.
-\include{chapters/01_the_task_and_the_data}
+% Chapters are subfiles: listed here for the book, self-contained on their own.
+\subfile{chapters/01_the_task_and_the_data}
 
 \end{document}

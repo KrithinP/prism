@@ -24,6 +24,12 @@ Target: **report + reproducible repo in 4–6 weeks** (started 2026-07-13).
 - **R3 — Claude authors the LaTeX textbook** (`docs/textbook/`) and all documentation directly,
   in the same session anything textbook-worthy happens (a result, a failure + its lesson, a
   decision, a first success).
+  - *Textbook format (binding):* the book uses the `subfiles` package. `main.tex` holds the one
+    shared preamble; every chapter starts `\documentclass[../main.tex]{subfiles}` so it compiles
+    **both** on its own and as part of the book, with zero preamble duplication. Keep listings
+    language-agnostic (no `language=XML`) so any snippet compiles on stock Overleaf/TeX Live.
+    Krithin works chapter-by-chapter in Overleaf: he uploads/zip-imports `docs/textbook/` and each
+    chapter recompiles by itself. Do not write a chapter that only compiles via `main.tex`.
 
 ## The facts that will bite you
 

@@ -1,3 +1,7 @@
+% Compiles on its own (pulls ../main.tex's preamble via subfiles) or as part of the book.
+\documentclass[../main.tex]{subfiles}
+\begin{document}
+
 \chapter{The Task, and the Data That Defines It}
 
 This chapter is the theory gate (R2) for the first thing we build: the data pipeline.
@@ -21,7 +25,7 @@ captured from a vehicle through a beam splitter, at $640\times512$, $20$\,Hz, da
 
 KAIST ships one XML file per frame. A single annotated object looks like this:
 
-\begin{lstlisting}[language=XML, morekeywords={object,name,bndbox,x,y,w,h,occlusion}]
+\begin{lstlisting}
 <object>
   <name>person</name>
   <bndbox> <x>562</x> <y>219</y> <w>43</w> <h>91</h> </bndbox>
@@ -104,3 +108,5 @@ the RGB and thermal boxes do not perfectly coincide}. On beam-split KAIST they s
 coincide --- but ``nearly'' is the entire premise of the project (Zhang et al.'s KAIST-Paired
 work exists because they do not \emph{exactly} coincide). Seeing the residual shift with your
 own eyes is the first evidence that the misalignment axis is real and not invented.
+
+\end{document}
