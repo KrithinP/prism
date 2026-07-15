@@ -1,0 +1,53 @@
+\documentclass[11pt]{book}
+
+% ---------------------------------------------------------------------------
+% PRISM: the living textbook.
+% Written alongside the project (working agreement R3): each chapter lands in the
+% same session the thing it documents happens -- a result, a failure and its
+% lesson, a decision, a first success. Krithin reads the relevant chapter as the
+% R2 theory gate before building that phase.
+%
+% Build:  latexmk -pdf main.tex     (needs texlive; not yet installed)
+% ---------------------------------------------------------------------------
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath, amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+\usepackage{geometry}
+\geometry{a4paper, margin=1in}
+
+\definecolor{codebg}{gray}{0.96}
+\lstset{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codebg},
+  breaklines=true,
+  frame=single,
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  keywordstyle=\color{blue!70!black},
+  commentstyle=\color{green!40!black},
+  showstringspaces=false,
+  language=Python,
+}
+
+% A recurring box for the lessons that were learned the hard way.
+\newenvironment{lesson}{\par\medskip\noindent\textbf{Lesson learned.}\itshape}{\par\medskip}
+
+\title{\textbf{PRISM}\\[0.5em]\large A Ground-Up Course in Multispectral Object Detection,\\ Written While Building One}
+\author{Krithin Poola \\ \small with the AIOS}
+\date{Started 2026-07-13}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+% Chapters are included as they are written, in build order.
+\include{chapters/01_the_task_and_the_data}
+
+\end{document}

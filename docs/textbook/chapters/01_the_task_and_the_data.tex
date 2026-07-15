@@ -1,0 +1,106 @@
+\chapter{The Task, and the Data That Defines It}
+
+This chapter is the theory gate (R2) for the first thing we build: the data pipeline.
+Before writing a loader, we settle what the loader must produce and why every one of its
+choices is load-bearing. In multispectral detection, more results have been quietly ruined
+by data-handling mistakes than by bad architectures. We start where the mistakes start.
+
+\section{What we are building, precisely}
+
+We have two cameras observing one scene: a visible-light (RGB) camera and a long-wave
+infrared (LWIR, ``thermal'') camera. Each emits an image. We want a single neural network
+that consumes \emph{both} and outputs a list of boxes around every pedestrian. The research
+question is not ``can we detect pedestrians'' --- that is solved --- but \emph{where inside
+the network the two streams should meet, and what operation should merge them}, and
+\emph{how that choice behaves when the two images stop lining up}.
+
+The benchmark is KAIST (Hwang et al., CVPR 2015): $95{,}328$ RGB--thermal image pairs
+captured from a vehicle through a beam splitter, at $640\times512$, $20$\,Hz, day and night.
+
+\section{The label file, decoded}
+
+KAIST ships one XML file per frame. A single annotated object looks like this:
+
+\begin{lstlisting}[language=XML, morekeywords={object,name,bndbox,x,y,w,h,occlusion}]
+<object>
+  <name>person</name>
+  <bndbox> <x>562</x> <y>219</y> <w>43</w> <h>91</h> </bndbox>
+  <occlusion>0</occlusion>
+</object>
+\end{lstlisting}
+
+Three facts here decide whether our numbers mean anything.
+
+\paragraph{1. The box format is \texttt{(x, y, w, h)}.} That is the \emph{top-left corner}
+plus \emph{width} and \emph{height} --- not two corners. Nearly every detection framework
+speaks $(x_1,y_1,x_2,y_2)$ internally, so the very first thing our parser does is convert:
+\[
+  x_2 = x + w, \qquad y_2 = y + h.
+\]
+Skip this and every box is the right size but anchored to the wrong place --- a bug that
+still ``trains,'' just to a worse model, which is the hardest kind to notice.
+
+\paragraph{2. Only \texttt{person} is a positive.} The labels contain four names:
+\texttt{person}, \texttt{cyclist}, \texttt{people} (a crowd too dense to box individually),
+and \texttt{person?} (annotator uncertain). The KAIST protocol scores \emph{only}
+\texttt{person}. The other three are \emph{ignore regions}: a detection that lands on one is
+thrown away before scoring --- neither counted as a hit nor charged as a false alarm.
+
+\begin{lesson}
+Ignore regions must be \emph{kept}, not deleted. Their whole job is to absorb detections
+that would otherwise be scored as false positives. A loader that filters the annotations
+down to \texttt{person} and discards the rest will inflate the false-positive count and
+report a worse miss rate than the identical model evaluated correctly. The information that
+protects your score lives in the labels you were tempted to throw away.
+\end{lesson}
+
+\paragraph{3. Occlusion is a tag, not a guess.} The \texttt{<occlusion>} field is
+$0$ (none), $1$ (partial), or $2$ (heavy). The headline ``Reasonable'' subset keeps
+pedestrians with occlusion $0$ or $1$ and height $\geq 55$ pixels, and ignores the rest.
+We store the tag now so the evaluator can apply the subset later; we do not filter at load
+time, because training and evaluation want different subsets of the same data.
+
+\section{The two images}
+
+Both modalities arrive as $512\times640$, 8-bit JPEGs. The thermal image is stored with
+three channels, but it originates from a single-sensor grayscale stream; the minute
+per-channel differences are JPEG chroma artifacts, not real color. So thermal is
+\emph{effectively single-channel}, and how we turn one channel into the three a
+conventional backbone expects is a real modeling decision we defer to a later chapter --- but
+we flag it here because it is exactly the kind of ``obvious'' preprocessing step where a
+silent train/test mismatch hides.
+
+\begin{lesson}
+Trust the decoded array, not the documentation. Much of the KAIST literature states the
+frames are $640\times480$; the actual JPEGs and the XML \texttt{<size>} field both say
+$640\times512$. A resize built on the wrong assumed size distorts every box coordinate by a
+few percent --- again, invisibly, because the model still trains.
+\end{lesson}
+
+\section{What the loader must return}
+
+For one frame index, the loader returns a paired sample:
+\[
+  \big(\, I_{\text{rgb}} \in \mathbb{R}^{3\times H\times W},\;\;
+          I_{\text{thm}} \in \mathbb{R}^{3\times H\times W},\;\;
+          B \in \mathbb{R}^{N\times4},\;\;
+          c \in \{0,1\}^{N},\;\;
+          o \in \{0,1,2\}^{N} \,\big),
+\]
+where $B$ are boxes in $(x_1,y_1,x_2,y_2)$ pixel coordinates, $c$ marks each box positive
+(\texttt{person}) or ignore, and $o$ is the occlusion tag. Because KAIST is beam-splitter
+registered, \emph{one} box set serves both modalities --- for now. The moment we start
+injecting misalignment (Chapter~[misalignment]), that assumption is exactly what we perturb,
+which is why the loader keeps the two images as separate tensors even though they share a
+label: the separation is the seam along which the whole headline experiment later opens.
+
+\section{The first slice to prove}
+
+The thinnest end-to-end slice for a detection project is one sample, drawn and looked at:
+image in $\rightarrow$ boxes parsed $\rightarrow$ boxes drawn on \emph{both} modalities
+$\rightarrow$ a human confirms they land on people. That is the build for this chapter, and
+its exit check is deliberately visual and slightly subversive: \emph{find five pairs where
+the RGB and thermal boxes do not perfectly coincide}. On beam-split KAIST they should nearly
+coincide --- but ``nearly'' is the entire premise of the project (Zhang et al.'s KAIST-Paired
+work exists because they do not \emph{exactly} coincide). Seeing the residual shift with your
+own eyes is the first evidence that the misalignment axis is real and not invented.
