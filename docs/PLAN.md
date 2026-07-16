@@ -540,3 +540,84 @@ CIoU loss row (orthogonal to the fusion question); thermal-stream pretraining st
 *This plan is executable by someone who remembers nothing about how it was made: protocol in
 §1, budget in §2, build order in §3, every run named and costed in §4–5, the decision rule in
 §6, what we expect in §7, and what to do when it goes wrong in §9–10.*
+
+---
+
+## AMENDMENT — 2026-07-16, from Soham's review (binding)
+
+Soham reviewed the status table and pushed on one thing: point 4 (imperfect/absent thermal) is
+"a major point of discussion" and should carry more weight. He added a concrete requirement that
+becomes a **headline experiment**, and specified how to stress it. This amendment elevates what
+was Axis E (modality dropout, previously "nice-to-have") to a first-class result, and reframes
+the temporal-skew axis as the same problem viewed along time.
+
+### The composability requirement (the new pass/fail)
+
+The fusion model must be **feature-composable**: usable with either stream missing, and strictly
+helped by thermal when present. Two conditions, tested together:
+
+- **C1 — graceful degradation:** with thermal absent, the model's RGB-only path must score
+  **within noise (2σ) of the RGB-only baseline** (C-rgb). It must not collapse (APEX's EO-blind
+  → MR 100% failure) and must not be dragged below baseline by having been trained with a thermal
+  stream (Krithin's Apollyon failure: fusion worse than plain EO/RGB).
+- **C2 — additive value:** with thermal present, the fused model must beat C-rgb by **> 2σ**, and
+  by more at **Night** than **Day** (where thermal carries the decision).
+
+A model that fails C1 is not deployable on a rig where thermal arrives late or not at all. A model
+that fails C2 has not earned the second sensor. Both are reported at full prominence; a fusion
+that only passes one is a named negative result, not a hidden one.
+
+### Why this is the APEX post-mortem, made testable
+
+Krithin's Apollyon fusion scored **worse than EO/RGB alone** and the cause was never diagnosed.
+C1+C2 are exactly the two probes that localize that failure: C2 asks "does thermal help at all?"
+(APEX: no — thermal-off changed nothing), C1 asks "does the RGB path still work?" (APEX: no —
+EO-blind collapsed to 0). Running these on KAIST, where the answer is checkable, is the point of
+the whole project. Diagnostics are explicitly shared this round (Soham: "I'll be better involved
+in the diagnostics… a hundred ways to understand why something isn't working").
+
+### Mechanism — random thermal availability (not scheduled)
+
+Real rigs deliver ~120 fps RGB / ~60 fps thermal, but arrival is **jittery and unpredictable**
+(hardware delay), not a clean every-other-frame. So:
+
+- **Training:** thermal present per-sample with probability `p_keep` (Bernoulli, i.i.d. per frame).
+  When absent, the thermal stream is replaced by its zero/learned-null token and a `thermal_valid`
+  flag; the fusion op must be built to accept the null (Axis B operators extended with a
+  valid-mask input). Sweep `p_keep ∈ {1.0, 0.75, 0.5, 0.25}` as a training-robustness axis.
+- **Evaluation (eval-only over each checkpoint):** score at thermal-availability
+  `∈ {both, RGB-only (thermal blackout), thermal-only}`. C1 uses the RGB-only column; C2 the
+  "both" column. This unifies with the Phase-4 **temporal-skew** sweep: skew is "stale thermal,"
+  blackout is "infinitely stale thermal" — the same availability axis, `fresh → stale(k) → absent`.
+
+### OOD generalization — proxy, since it can't be measured directly
+
+Use KAIST's built-in domain shift as the proxy: **train day-heavy, test night** (and the reverse).
+RGB is effectively OOD at night. The claim to test: the fused model's **day→night degradation is
+smaller than C-rgb's** — i.e. thermal buys generalization, not just in-domain accuracy. Also
+explore the data for other proxies (scale strata, per-set distribution shift) before committing
+the figure. Reported as a proxy, labelled as a proxy.
+
+### Plan deltas
+
+- **New MUST rows (Axis E, promoted):** `F-cat-345-drop@{0.75,0.5,0.25}` (random-availability
+  training), each scored under {both, RGB-only, thermal-only}. Reuse F-cat-345 (p_keep=1.0) as the
+  no-dropout reference. Cost: 3 trains × ~4 h + eval passes ≈ 14 GPU-h. Pulls from the Phase-4
+  scale-sweep and F-illum nice-to-haves; net envelope still fits.
+- **Operators must accept a missing stream.** Axis B implementations take `(F_rgb, F_thermal,
+  thermal_valid)`; sum/concat/gate/se each get a defined null behavior. This is a small design
+  constraint on every fusion op, decided now so it isn't retrofitted.
+- **New pre-registered predictions:**
+  - **P14 (composability):** F-cat-345-drop passes C1 (RGB-only path within 2σ of C-rgb) at
+    p_keep ≤ 0.75, and passes C2 (both-streams beats C-rgb, Night-led). *Falsified if* dropout
+    training cannot achieve both at once — which would mean composability needs an architectural
+    change (a null-token/gated path), itself a finding.
+  - **P15 (the APEX echo):** F-cat-345 trained WITHOUT dropout (p_keep=1.0) **fails C1** — its
+    RGB-only path scores well below C-rgb (thermal-addicted), reproducing the Apollyon failure on
+    KAIST. *Falsified if* the no-dropout model degrades gracefully anyway.
+  - **P16 (OOD proxy):** day→night degradation is smaller for the fused model than for C-rgb.
+    *Falsified if* fusion's generalization gap is no better than RGB-only's.
+
+The clean-data operator sweep stays the null control; misalignment stays the headline; **this
+amendment makes graceful composability the second headline and ties both to a real deployment
+constraint Soham cares about.**
