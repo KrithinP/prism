@@ -1,0 +1,85 @@
+% Compiles on its own (pulls ../main.tex's preamble via subfiles) or as part of the book.
+\documentclass[../main.tex]{subfiles}
+\begin{document}
+
+\chapter{Augmentation Without Breaking the Pair}
+
+This chapter is the theory gate for the last piece of the data pipeline: data augmentation,
+and the unit test that keeps it honest. It is a short chapter about a large class of silent
+bugs.
+
+\section{Why augmentation is dangerous here specifically}
+
+Data augmentation --- randomly flipping, cropping, scaling, and colour-jittering training
+images --- is standard and usually harmless. In single-image detection you transform the image
+and its boxes together, and if you get it slightly wrong you notice, because the boxes visibly
+drift off the objects.
+
+Multispectral fusion removes that safety net. We now transform \emph{two} images that must stay
+in pixel-for-pixel correspondence, because middle fusion adds their feature maps together at a
+matching spatial location. If a random crop takes a slightly different window from the RGB image
+than from the thermal image, then at fusion time we are adding the features of a pedestrian in
+one stream to the features of the pavement beside them in the other. The network still trains.
+The loss still goes down. The model is just quietly worse, and nothing tells you why.
+
+\begin{lesson}
+The correspondence that fusion depends on is created by the loader and can be destroyed by the
+augmentation. There is no error message for a broken pair --- only a worse number that looks like
+a bad architecture. So we do not \emph{trust} the augmentation to preserve correspondence; we
+\emph{test} it, once, with an assertion that fails loudly the day someone breaks it.
+\end{lesson}
+
+\section{The rule, and why it has two halves}
+
+Augmentations split cleanly into two kinds, and the two kinds are treated oppositely.
+
+\paragraph{Geometric augmentations move pixels.} Horizontal flip, crop, scale, rotation,
+translation. These \emph{must} be applied identically --- same operation, same random parameters
+--- to the RGB image, the thermal image, \emph{and} the boxes. The whole point is that all three
+move together, so the correspondence survives. Sample the random flip decision \emph{once} and
+feed it to all three; never let each stream roll its own dice.
+
+\paragraph{Photometric augmentations change values, not positions.} Brightness, contrast, hue,
+saturation jitter. These are applied to the \emph{RGB stream only}. Two reasons. First, they do
+not affect correspondence (a pixel keeps its location), so there is no pairing constraint.
+Second, and more importantly, they are \emph{physically meaningless on thermal}. A thermal pixel
+is a radiometric measurement --- roughly, an apparent temperature. Randomly scaling its
+``brightness'' or shifting its ``hue'' corrupts the one quantity the thermal stream exists to
+carry. Colour-jittering a thermal image is not augmentation; it is noise injection into your most
+reliable night-time signal.
+
+\begin{lesson}
+Geometric augmentations: identical on both streams, boxes included, one shared random draw.
+Photometric augmentations: RGB only. Getting the split backwards --- jittering thermal, or
+letting the two streams flip independently --- is among the most common and most invisible causes
+of ``my fusion model is worse than my single-modality baseline.''
+\end{lesson}
+
+\section{Testing correspondence, not trusting it}
+
+We prove the geometric path with a constructed example rather than an inspected one. Place an
+identical bright marker at a known pixel in \emph{both} synthetic modalities, and a box around
+it. Apply a paired geometric transform. Then assert two things:
+
+\begin{enumerate}
+  \item the marker lands at the \emph{same} pixel location in the transformed RGB and the
+        transformed thermal --- the two streams moved together; and
+  \item the transformed box still contains the transformed marker --- the boxes moved with the
+        pixels.
+\end{enumerate}
+
+If someone later edits the transform so that only one stream flips, or the boxes are left
+untouched, the first or second assertion fails immediately, at test time, instead of six weeks
+later as an unexplained dip in the results table. This is the first \emph{unit test} of the
+project: a small, permanent, automatic check of a property we care about, run by \texttt{pytest}.
+It costs a minute to write and it retires an entire category of silent failure.
+
+\section{Scope for now}
+
+We do not need the full training-time augmentation zoo yet (Mosaic, MixUp, and the rest arrive
+with the training phase, and each will extend the same correspondence test). For now we implement
+the two representatives that exercise both halves of the rule --- a paired horizontal flip
+(geometric) and an RGB-only brightness/contrast jitter (photometric) --- and the test that guards
+them. The lesson is the invariant, not the size of the menu.
+
+\end{document}
