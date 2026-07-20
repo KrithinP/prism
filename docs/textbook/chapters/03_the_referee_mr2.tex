@@ -1,0 +1,127 @@
+% Compiles on its own (pulls ../main.tex's preamble via subfiles) or as part of the book.
+\documentclass[../main.tex]{subfiles}
+\begin{document}
+
+\chapter{The Referee: How KAIST Scores a Detector}
+
+This chapter is the theory gate for the single most important thing we build in the whole
+foundation phase: the evaluator. Every number the project ever reports passes through this code.
+If it is wrong, every result after it is wrong --- and wrong \emph{convincingly}, because a broken
+evaluator still produces plausible-looking numbers. So we build it deliberately, and we do not
+believe it until it reproduces a published result.
+
+\section{The job}
+
+The evaluator takes, for every test image, a list of \emph{detections} the model produced --- each
+a box with a confidence score --- and the list of \emph{ground-truth} boxes a human annotated. It
+returns a single number, the log-average miss rate MR$^{-2}$, that says how good the detector is.
+Lower is better.
+
+Getting from ``two lists of boxes'' to ``one number'' has four stages. We take them in order.
+
+\section{Stage 1 --- was a detection correct? (IoU matching)}
+
+A detection is a \emph{true positive} if it lands on a real pedestrian, and a \emph{false
+positive} if it does not. ``Lands on'' is made precise by \textbf{Intersection over Union}:
+\[
+  \mathrm{IoU}(A, B) = \frac{\text{area}(A \cap B)}{\text{area}(A \cup B)} \in [0, 1].
+\]
+The KAIST convention: a detection matches a ground-truth box if $\mathrm{IoU} \geq 0.5$.
+
+Two subtleties decide correctness, and both are classic silent bugs:
+
+\paragraph{One-to-one matching.} If three detections all overlap the same pedestrian, only
+\emph{one} may be a true positive; the other two are false positives (double-counting). So we
+process a frame's detections from highest confidence down, and each ground-truth box can be
+claimed once. Skip this and a model that fires ten boxes per person looks better than it is.
+
+\paragraph{Ignore regions absorb, they do not reward.} Recall from Chapter~1 that
+\texttt{people}, \texttt{cyclist}, and \texttt{person?} are ignore regions. A detection matching
+an ignore region is \emph{removed from the tally entirely} --- not a true positive, not a false
+positive. This is why we carried the ignore boxes all the way here instead of deleting them at
+load time: their entire purpose is to stop the model being punished for firing on a cyclist it
+was never asked to find.
+
+\begin{lesson}
+The evaluator and the loss function disagree about ignore regions on purpose. Training never
+supervises them; scoring never charges for them. A detection on a group of people is neither
+right nor wrong --- it simply does not count. An evaluator that scores it as a false positive
+reports a worse miss rate than the identical model deserves, and the gap is invisible unless you
+know to look.
+\end{lesson}
+
+\section{Stage 2 --- the trade-off is a curve, not a point}
+
+A detector does not have ``an accuracy.'' It has a confidence knob. Keep only detections above a
+high threshold and you make few false alarms but miss real people; lower the threshold and you
+catch more people but raise more false alarms. Every threshold gives one operating point:
+\[
+  \text{miss rate } = \frac{\text{missed pedestrians}}{\text{all pedestrians}},
+  \qquad
+  \text{FPPI} = \frac{\text{false positives}}{\text{number of images}}.
+\]
+Sweep the threshold from high to low and you trace a curve of miss rate against FPPI (false
+positives per image). A better detector's curve sits lower --- fewer misses at the same false-alarm
+budget. This curve, not any single point, \emph{is} the detector's performance.
+
+\section{Stage 3 --- collapsing the curve to one number (MR$^{-2}$)}
+
+To rank methods we need one number. KAIST's recipe:
+\begin{enumerate}
+  \item Read the miss rate off the curve at \textbf{nine} FPPI points, evenly spaced on a log
+        scale from $10^{-2}$ to $10^{0}$:
+        $\{0.01, 0.0178, 0.0316, 0.0562, 0.1, 0.178, 0.316, 0.562, 1.0\}$.
+  \item Average the logarithms of those nine miss rates, then exponentiate (a geometric mean):
+        \[
+          \mathrm{MR}^{-2} = \exp\!\left(\frac{1}{9}\sum_{i=1}^{9} \ln(\text{mr}_i)\right).
+        \]
+\end{enumerate}
+Two design choices in this recipe matter. The range stops at FPPI${}=1$ (one false alarm per
+image); nobody deploys a pedestrian detector noisier than that, so performance there is
+irrelevant and excluded. And the average is over \emph{log} miss rate, which weights the
+low-false-alarm end --- the deployable end --- heavily. MR$^{-2}$ is, deliberately, a measurement of
+how well you do when you are barely allowed to cry wolf. The ``$-2$'' in the name is just the
+$10^{-2}$ lower limit; it is not an exponent.
+
+\section{Stage 4 --- the subset, and the splits}
+
+The headline number is computed on the \textbf{Reasonable} subset: ground-truth pedestrians at
+least $55$ pixels tall with occlusion \texttt{none} or \texttt{partial}. Shorter or heavily
+occluded pedestrians are treated as ignore regions for this number --- present, but not scored. And
+the whole computation is reported three times: over \textbf{all} test frames, \textbf{day} frames
+only, and \textbf{night} frames only, because (Chapter on physics) the two modalities trade
+dominance between day and night, and an aggregate number hides the most interesting effect in the
+whole project.
+
+\section{Why we verify before we trust}
+
+Here is the discipline that separates this from a homework submission. An evaluator with a subtle
+bug --- an off-by-one in the FPPI points, the wrong IoU threshold, ignore regions mishandled ---
+still returns a number in the right ballpark. You cannot tell it is wrong by looking at it. The
+only defence is to run our evaluator on a \emph{published method's own detections} and check we
+reproduce \emph{their} published MR$^{-2}$ to within a fraction of a point. Several KAIST papers
+release their raw detection files precisely so this is possible.
+
+\begin{lesson}
+Never trust a metric you have not validated against a known answer. Build the evaluator, feed it
+a published method's released detections, and confirm you get that method's published number. Only
+then is your ruler calibrated. Every result in this project rests on that one check; it is the
+cheapest insurance you will ever buy, and skipping it is how a whole study quietly becomes fiction.
+\end{lesson}
+
+\section{The build order}
+
+We implement the four stages bottom-up, each testable on its own before the next is added:
+\begin{enumerate}
+  \item IoU and per-frame matching (true/false positives, ignore handling) --- unit-tested on
+        hand-made boxes with a known answer;
+  \item accumulate matches across all frames and sweep the threshold into the miss-rate/FPPI
+        curve;
+  \item the log-average over the nine points;
+  \item the Reasonable-subset filter and the day/night/all split, then the validation against a
+        published method's detections.
+\end{enumerate}
+The first stage is where correctness is won or lost, so that is where we start, and we start with
+a test whose answer we can compute by hand.
+
+\end{document}
