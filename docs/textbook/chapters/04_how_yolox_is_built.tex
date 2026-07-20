@@ -1,0 +1,159 @@
+% Compiles on its own (pulls ../main.tex's preamble via subfiles) or as part of the book.
+\documentclass[../main.tex]{subfiles}
+\begin{document}
+
+\chapter{How YOLOX Is Built, and Where Fusion Goes}
+
+This is the theory gate for the model. By the end you should be able to draw YOLOX on paper,
+label the tensor shapes, and point at the exact place our fusion module attaches.
+
+\section{Three parts}
+
+Every modern one-stage detector has the same three parts.
+
+\begin{enumerate}
+  \item \textbf{Backbone} --- eats the image, produces feature maps at three scales.
+  \item \textbf{Neck} --- mixes those three scales together so small and large objects are both
+        handled well.
+  \item \textbf{Head} --- turns feature maps into boxes and class scores.
+\end{enumerate}
+
+Our input is $640\times512$. Everything below uses those numbers so the shapes are concrete.
+
+\section{The backbone: CSPDarknet}
+
+The backbone shrinks the image step by step while growing the number of channels. It outputs
+three feature maps, named after the stage that produced them:
+
+\begin{center}
+\begin{tabular}{llrl}
+\toprule
+Name & Stride & Size & Holds \\
+\midrule
+\texttt{dark3} & 8  & $80\times64$, 128 ch & edges, texture, small parts \\
+\texttt{dark4} & 16 & $40\times32$, 256 ch & limbs, torsos \\
+\texttt{dark5} & 32 & $20\times16$, 512 ch & ``a person-ish thing is here'' \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Stride} is how many input pixels one cell of the feature map covers. Stride 8 means each
+cell summarises an $8\times8$ patch. Check the arithmetic: $640/8=80$, $512/8=64$. And
+$640/32=20$, $512/32=16$.
+
+Going deeper, you gain \emph{meaning} and lose \emph{location}. \texttt{dark3} knows precisely
+where an edge is but not what it belongs to. \texttt{dark5} knows there is a person but only
+roughly where.
+
+The backbone is made of four repeated pieces:
+\begin{itemize}
+  \item \textbf{ConvBNAct} --- convolution, batch-norm, activation. The atom.
+  \item \textbf{Bottleneck} --- two ConvBNActs with an optional skip connection.
+  \item \textbf{CSPLayer} --- splits the channels in two, sends one half through several
+        Bottlenecks, and concatenates. ``CSP'' means Cross-Stage Partial. It gets most of the
+        benefit of a deep stack for about half the compute, which is why it is everywhere.
+  \item \textbf{SPPBottleneck} --- pools with several kernel sizes ($5,9,13$) and concatenates,
+        so one layer sees several receptive-field sizes at once. Sits at the end, in
+        \texttt{dark5}.
+\end{itemize}
+
+\section{The neck: PAFPN}
+
+A pedestrian 60\,px tall is best detected at one scale; one 300\,px tall at another. The neck
+lets the three scales share information. PAFPN does two passes:
+
+\begin{enumerate}
+  \item \textbf{Top-down}: upsample \texttt{dark5}, merge into \texttt{dark4}, upsample that,
+        merge into \texttt{dark3}. Semantic meaning flows \emph{down} to the high-resolution maps.
+  \item \textbf{Bottom-up}: downsample the result and merge back up. Precise location flows
+        \emph{up} to the semantic maps.
+\end{enumerate}
+
+Out come three maps at the same three strides, but each now informed by the others.
+
+\section{The head: decoupled, anchor-free}
+
+At every cell of every output map, the head answers three questions with three separate small
+branches --- this separation is the ``decoupled head'', and it is a large part of why YOLOX
+converges faster than earlier YOLOs:
+
+\begin{itemize}
+  \item \textbf{class} --- what is it?
+  \item \textbf{objectness} --- is there anything here at all?
+  \item \textbf{box} --- four numbers giving the box, predicted \emph{directly} (anchor-free:
+        no template boxes to hand-tune).
+\end{itemize}
+
+Total predictions per image: $80{\cdot}64 + 40{\cdot}32 + 20{\cdot}16 = 5120+1280+320 = 6720$.
+Most say ``nothing here.'' Non-maximum suppression then removes duplicates.
+
+\section{SimOTA, and why we do not rewrite it}
+
+During training something must decide \emph{which} of those 6720 cells is responsible for each
+real pedestrian. That is \textbf{label assignment}, and YOLOX uses \textbf{SimOTA}: it builds a
+cost matrix (classification + box error) between every candidate cell and every ground-truth
+object, then dynamically picks the best $k$ cells per object, with $k$ chosen per object rather
+than fixed.
+
+We port SimOTA and the losses rather than reimplement them. The reason is methodological, not
+lazy: SimOTA is \emph{held fixed across every experiment in this project}. It is not a variable
+we ablate. A subtle bug there would corrupt every row of the results table equally and be nearly
+impossible to detect, and debugging it would consume weeks that buy no scientific result. We
+write the parts we vary; we borrow the parts we hold constant.
+
+\begin{lesson}
+There is a real interaction to stay alert to. Label assignment depends on the loss values at each
+cell, and fusion changes the features feeding those cells. So a fusion change can shift which
+cells become positives, producing an accuracy change that has \emph{nothing to do with better
+features}. If an ablation row moves unexpectedly, check the positive/negative split before
+believing the architecture story.
+\end{lesson}
+
+\section{Where fusion attaches}
+
+Here is the whole point of the chapter. For two modalities we run \emph{two} backbones --- one on
+RGB, one on thermal --- and merge before the neck:
+
+\begin{center}
+\begin{tabular}{l}
+\toprule
+RGB $\rightarrow$ backbone$_\text{rgb}$ $\rightarrow$ (\texttt{dark3}, \texttt{dark4}, \texttt{dark5}) \\
+thermal $\rightarrow$ backbone$_\text{thm}$ $\rightarrow$ (\texttt{dark3}, \texttt{dark4}, \texttt{dark5}) \\
+\midrule
+\textbf{fusion} at one or more stages $\rightarrow$ fused (\texttt{dark3}, \texttt{dark4}, \texttt{dark5}) \\
+\midrule
+$\rightarrow$ PAFPN neck $\rightarrow$ decoupled head $\rightarrow$ boxes \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Two design facts follow immediately.
+
+\textbf{The fused output must keep the same shapes} the neck already expects
+($128/256/512$ channels at strides $8/16/32$). Any fusion operator that changes the channel count
+must project back. This is why ``concat then $1\times1$ convolution'' is the workhorse: concat
+doubles the channels, and the $1\times1$ halves them back.
+
+\textbf{Which stage you fuse at is Axis A of the ablation}, and by Chapter~1's stride argument it
+is also the misalignment story. An 8\,px shift between the modalities is a full cell at
+\texttt{dark3} (stride 8), but a quarter of a cell at \texttt{dark5} (stride 32). Fusing deep is
+automatically more tolerant of misregistration; fusing shallow demands near-perfect alignment.
+
+Every fusion operator we write must also accept a \emph{missing} thermal stream (the
+\texttt{thermal\_valid} flag from the plan amendment), because Soham's composability requirement
+says the RGB path must still work when thermal does not arrive.
+
+\section{Build order}
+
+We build bottom-up, testing shapes at each step before adding the next:
+\begin{enumerate}
+  \item the blocks: ConvBNAct, Bottleneck, CSPLayer, SPPBottleneck;
+  \item assemble CSPDarknet, and assert it emits the three shapes in the table above;
+  \item the PAFPN neck;
+  \item the decoupled head;
+  \item ported SimOTA + losses, then a single-stream training run (the RGB-only baseline).
+\end{enumerate}
+Only then do we go two-stream. A fusion model built on an unverified backbone is impossible to
+debug.
+
+\end{document}
