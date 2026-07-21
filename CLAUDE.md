@@ -13,6 +13,22 @@ grid, honest metrics — rather than reasoning about fusion from an armchair.
 
 Target: **report + reproducible repo in 4–6 weeks** (started 2026-07-13).
 
+## Status (2026-07-21)
+
+Phase 0 (data + MR⁻² evaluator) done; **Phase 1 model built from scratch** — blocks → CSPDarknet →
+PAFPN → decoupled anchor-free head → assembled YOLOX (**8.94M params**, matches YOLOX-S) → decoder
+→ runs end-to-end. **22 tests green** (`make test`). Full 36GB KAIST verified + extracted.
+**Next: port loss + SimOTA, then train from-scratch RGB-only / thermal-only baselines.**
+
+**Locked training directives (Soham, see decisions log):** train **from scratch** (small model +
+small data); **5 seeds on every experiment** (mean±std, 2σ bar); small **LR + LR-decay sweep**
+before locking the recipe; report the **full standard KAIST metric suite** (MR⁻² Reasonable
+All/Day/Night primary; scale/occlusion subsets secondary; **mAP a cross-check only** — it hid the
+Apollyon modality-collapse). Recipe held fixed across all experiments once set.
+
+Docs kept in sync: textbook `docs/textbook/` (Ch.1–5), paper skeleton `docs/paper/main.tex`,
+visual trace `docs/PIPELINE_TRACE.md`, build-order study list `docs/STUDY_MODEL_PHASE.md`.
+
 ## Working agreement (binding)
 
 - **R1 — Krithin types all implementation code.** Claude provides reference code, reviews, and

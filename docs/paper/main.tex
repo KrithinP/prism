@@ -96,16 +96,28 @@ channel (SE) gating; illumination gating; and a cross-attention ceiling referenc
 thermal present / absent / stale. Every operator accepts a missing stream via a validity flag.
 
 \subsection{Evaluation}
-Log-average miss rate MR$^{-2}$ over FPPI $\in[10^{-2},10^0]$ on the Reasonable subset (height
-$\geq 55$px, occlusion $\leq$ partial), reported All / Day / Night, using sanitized-train and
-improved-test annotations. Our evaluator is validated against a published method's released
-detections \pending{verification PENDING}. Every result is mean$\pm$std over $\geq$3 seeds; a
-difference below 2$\sigma$ is not treated as a result.
+We report the standard KAIST metric suite, primary being log-average miss rate MR$^{-2}$ over
+FPPI $\in[10^{-2},10^0]$ on the Reasonable subset (height $\geq 55$px, occlusion $\leq$ partial),
+split All / Day / Night, using sanitized-train and improved-test annotations. Secondary: the
+All-condition setting and the scale/occlusion subset breakdowns of the Caltech protocol; mAP is
+included only as a cross-check and no claim rests on it (mAP masked a modality-collapsed fusion in
+prior in-house work). Our evaluator is validated against a published method's released detections
+\pending{verification PENDING}. Every result is mean$\pm$std over \textbf{5 seeds}; a difference
+below 2$\sigma$ is not treated as a result.
 
 \section{Experimental Setup}
-KAIST: 95{,}324 aligned RGB--thermal pairs; standard 2{,}252-image test split (1{,}455 day /
-797 night). Training on the sanitized annotations. Hardware: single RTX 5070 Ti (12\,GB).
-\pending{optimiser, LR schedule, epochs, batch size PENDING -- fill at Phase 1 training.}
+KAIST: 95{,}324 aligned RGB--thermal pairs. Training uses the standard every-2nd-frame list of
+sets 00--05 (25{,}086 frames, of which 9{,}288 contain a pedestrian) with sanitized annotations;
+the whole set contains only $\sim$1{,}182 unique pedestrians. Test is the standard 2{,}252-image
+split (1{,}455 day / 797 night) with improved annotations. Hardware: single RTX 5070 Ti (12\,GB).
+
+Given a small model ($8.94$\,M parameters) and a small dataset, all models are \textbf{trained
+from scratch} (no ImageNet/COCO pretraining), so every configuration starts identically and no
+pretrained-weight prior confounds the comparison; the trade-off is higher absolute MR$^{-2}$ than
+pretrained methods in the literature, which is immaterial to a study of \emph{deltas} between
+fusion designs. Learning rate and decay are set by a small sweep before the recipe is locked; the
+recipe is then held fixed across all experiments. \pending{final optimiser, LR, epochs, batch
+size PENDING -- fill after the LR sweep.}
 
 \section{Results}
 

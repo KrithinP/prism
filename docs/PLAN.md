@@ -621,3 +621,29 @@ the figure. Reported as a proxy, labelled as a proxy.
 The clean-data operator sweep stays the null control; misalignment stays the headline; **this
 amendment makes graceful composability the second headline and ties both to a real deployment
 constraint Soham cares about.**
+
+---
+
+## AMENDMENT — 2026-07-21, Soham's training directives (binding)
+
+Confirmed after Soham saw the model size (8.94M params) and dataset size (25,086 train frames,
+9,288 with a pedestrian; 1,182 unique pedestrians; small):
+
+1. **Train from scratch** — no pretraining. Small-model + small-data is "an empirical question";
+   every config starts identically, no pretrained prior confounds the deltas. Absolute MR^-2 will
+   be higher than pretrained literature; immaterial to a comparison study. Supersedes the earlier
+   pretrained lean.
+2. **5 seeds on EVERY experiment** (not just baseline + best row). The model is small and trains
+   fast, so full 5-seed coverage is affordable and makes every row statistically honest. Report
+   mean +/- std; nothing under 2 sigma is a result. This ~2.5x's the run count vs the original
+   "2 seeds per MUST row" -- revisit the cut list after the first from-scratch baseline gives a
+   real per-run wall-clock.
+3. **Small LR + LR-decay sweep** before locking the training recipe; then hold the recipe fixed
+   across all experiments.
+4. **Report the full standard KAIST metric suite** (see decisions log 2026-07-21): MR^-2 on
+   Reasonable All/Day/Night primary; All-condition + scale/occlusion subsets secondary; mAP a
+   cross-check only. Extend the evaluator to emit the subset breakdowns.
+
+Everything else in the plan and prior amendments stands. Immediate next build step: port the
+loss + SimOTA (fixed across all experiments), then the from-scratch RGB-only / thermal-only
+baselines with the LR sweep and 5-seed noise floor.
