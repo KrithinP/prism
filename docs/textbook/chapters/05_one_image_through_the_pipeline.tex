@@ -1,0 +1,72 @@
+% Compiles on its own (pulls ../main.tex's preamble via subfiles) or as part of the book.
+\documentclass[../main.tex]{subfiles}
+\begin{document}
+
+\chapter{One Image Through the Pipeline}
+
+Theory is easier to trust when you can watch it happen to something real. This chapter follows a
+single KAIST frame --- \texttt{set06/V000/I01259}, a daytime tree-lined avenue with one pedestrian
+--- through every step built so far, and looks at what each step does to it. It is a living
+chapter: a panel is added as the pipeline grows (neck, head, fusion, and finally the same frame
+after training).
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\linewidth]{pipeline_trace_phase1}
+  \caption{One real KAIST frame through PRISM so far. \textbf{Row 1 (load):} the RGB and thermal
+  pair with the ground-truth box, at identical pixel coordinates in both. \textbf{Row 2
+  (augment):} the same pair after a paired horizontal flip --- both streams and the box move
+  together. \textbf{Row 3 (backbone):} the RGB image squeezed into its three feature-map summaries
+  \texttt{dark3}/\texttt{dark4}/\texttt{dark5}, shown as activation heatmaps. Regenerate with
+  \texttt{python scripts/trace\_image.py}.}
+  \label{fig:trace}
+\end{figure}
+
+\section{Row 1 --- Load}
+
+The frame arrives as a \emph{pair}: the visible RGB image and the thermal (LWIR) image, both
+looking at the same scene. The green box marks the one scored pedestrian, read from the sanitized
+annotation. The box sits at the \emph{same pixel coordinates in both images} --- and that shared
+alignment is precisely what fusion will later depend on. Behind the picture, the loader has
+converted the box from $x,y,w,h$ to $x_1,y_1,x_2,y_2$, marked \texttt{person} as scored and the
+other classes as ignore regions, and returned two $640\times512$ tensors.
+
+\section{Row 2 --- Augment}
+
+The same pair after a paired horizontal flip. The pedestrian, the lane markings, everything moves
+to the opposite side --- and it moves \emph{identically in both streams}, with the box following
+the pixels. This is the augmentation rule from Chapter~2 made visible: geometric operations are
+applied the same way to both modalities, so the pair never comes unstuck. The correspondence unit
+test is the automatic proof that this property holds; the figure is the human-readable version of
+the same guarantee.
+
+\section{Row 3 --- Backbone}
+
+The RGB image squeezed into its three summaries, shown as heatmaps (brighter = stronger
+activation). Read them left to right and watch the resolution collapse:
+\begin{itemize}
+  \item \texttt{dark3} --- $64\times80$, stride 8. Still detailed: road edges, trees, and lane
+        lines are visible.
+  \item \texttt{dark4} --- $32\times40$, stride 16. Coarser; fine detail is gone, broad structure
+        remains.
+  \item \texttt{dark5} --- $16\times20$, stride 32. Very coarse --- bright region here, road there.
+        It knows roughly \emph{what} is \emph{where}, not precisely where.
+\end{itemize}
+
+Two honest points about this row.
+
+First, the backbone is \emph{untrained} --- its weights are random. So the maps highlight edges and
+texture, not pedestrians; after training they will fire on people instead. The point of the row
+right now is not what the maps detect but the \emph{spatial shrink}.
+
+Second --- and this is the payoff --- that shrink is the misalignment story from Chapter~1, drawn.
+An $8$-pixel offset between the RGB and thermal cameras is a full cell at \texttt{dark3}
+(stride 8) but only a quarter of a cell at \texttt{dark5} (stride 32). So \emph{where} we fuse
+directly sets how tolerant the detector is to the two cameras not lining up --- the entire Phase-4
+headline is visible here, in the coarsening from left to right.
+
+These three maps are exactly where fusion attaches. When we go two-stream, a second backbone
+produces a second \texttt{dark3}/\texttt{dark4}/\texttt{dark5} from the thermal image, and the
+fusion operator merges the two sets before the neck ever sees them.
+
+\end{document}

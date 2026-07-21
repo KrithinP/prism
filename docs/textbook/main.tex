@@ -31,6 +31,8 @@
 \usepackage[hidelinks]{hyperref}
 \usepackage{subfiles}          % <-- lets each chapter compile standalone too
 \geometry{a4paper, margin=1in}
+% Find figures whether compiling main.tex (figures/) or a chapter standalone (../figures/).
+\graphicspath{{figures/}{../figures/}}
 
 % --- code listing style (language set per-listing, so any file type is safe) ---
 \definecolor{codebg}{gray}{0.96}
@@ -63,5 +65,6 @@
 \subfile{chapters/02_augmentation_without_breaking_the_pair}
 \subfile{chapters/03_the_referee_mr2}
 \subfile{chapters/04_how_yolox_is_built}
+\subfile{chapters/05_one_image_through_the_pipeline}
 
 \end{document}

@@ -114,7 +114,13 @@ def main():
     fig.tight_layout(rect=[0, 0.04, 1, 0.98])
     out = OUT / f"trace_{FRAME.replace('/', '_')}.png"
     fig.savefig(out, dpi=110); plt.close(fig)
-    print("wrote", out)
+    # keep the committed doc copies in sync (markdown doc + textbook zip)
+    import shutil
+    for dst in ("docs/figures/pipeline_trace_phase1.png",
+                "docs/textbook/figures/pipeline_trace_phase1.png"):
+        Path(dst).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(out, dst)
+    print("wrote", out, "(+ synced docs/figures and docs/textbook/figures)")
     print(f"shapes: dark3 {tuple(c3.shape)}  dark4 {tuple(c4.shape)}  dark5 {tuple(c5.shape)}")
 
 
