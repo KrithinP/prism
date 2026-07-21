@@ -1,0 +1,147 @@
+% ===========================================================================
+% PRISM -- the research paper, written as the project goes.
+%
+% This is the RESULTS-first document (distinct from docs/textbook/, which is the
+% teaching record). We fill it as experiments land, so at the end it is mostly
+% written rather than scrambled together.
+%
+% OVERLEAF: self-contained, compiles on stock Overleaf/TeX Live. To submit to a
+% venue later, swap \documentclass to that venue's template (IEEEtran, cvpr, etc.)
+% -- the section content carries over unchanged.
+%
+% Status markers used below:
+%   [PENDING]  -- experiment not yet run; number/text is a placeholder.
+%   [LOCKED]   -- pre-registered before running (do not edit after Phase 1 starts).
+% ===========================================================================
+\documentclass[10pt,twocolumn]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+\usepackage[margin=0.75in]{geometry}
+
+\newcommand{\pending}[1]{\textcolor{gray}{\textit{[#1]}}}
+
+\title{\textbf{PRISM: A Controlled Study of Middle-Fusion Design\\
+for RGB--Thermal Pedestrian Detection under Sensor Degradation}}
+\author{Krithin Poola\\ \small Apollyon Dynamics \& BITS Pilani, Hyderabad}
+\date{Draft --- \today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\pending{PENDING -- written last.}
+We study \emph{where} and \emph{how} to fuse RGB and thermal features inside a single-stage
+detector, and --- unlike prior work that reports on geometrically aligned benchmarks --- we
+measure how each design choice behaves when the thermal stream is spatially misaligned,
+temporally stale, or absent. On the KAIST multispectral pedestrian benchmark we hold the
+detector (YOLOX), training schedule, and augmentation fixed and vary only the fusion stage and
+operator, reporting log-average miss rate (MR$^{-2}$) with seed variance. \pending{headline
+results PENDING.} Our central questions: does the fusion operator matter on aligned data; which
+operators degrade gracefully under misalignment; and can a fusion detector remain
+\emph{composable} --- as good as its RGB-only baseline when thermal is missing, and better when
+it is present.
+\end{abstract}
+
+\section{Introduction}
+Multispectral pedestrian detection combines a visible (RGB) and a long-wave infrared (thermal)
+camera because the two are complementary: RGB carries colour and texture and fails at night;
+thermal images emitted heat and sees people in darkness but cannot see through glass and washes
+out during thermal crossover. The dominant design is \emph{middle fusion}: two modality-specific
+backbones whose features are merged partway through the network.
+
+Two gaps motivate this work. First, on the standard aligned benchmark the reported gap between
+cheap and expensive fusion operators is small, while data-quality factors dominate --- suggesting
+the operator may matter far less than the literature's architectural emphasis implies. Second,
+real dual-camera rigs are not aligned or synchronised: fields of view differ, parallax shifts
+objects, and a thermal frame may arrive late or not at all. A fusion detector that is excellent
+on aligned data but collapses when thermal is stale or missing is not deployable.
+
+We therefore run a \emph{controlled} study: one detector, one schedule, one augmentation policy,
+varying only the fusion design, and we make sensor degradation a first-class experimental axis.
+\pending{contributions PENDING -- finalise after results.}
+
+\section{Related Work}
+\pending{Draft from docs/LITERATURE.md.} Halfway Fusion~[Liu 2016] established mid-fusion on
+KAIST; subsequent gains came largely from annotation cleanup~[MSDS-RCNN], illumination-aware
+gating~[MBNet], region alignment for weak misregistration~[AR-CNN], and strong late-fusion
+ensembling~[ProbEn]. Across a 100$\times$ range of fusion cost the reported MR$^{-2}$ spread is
+$\sim$2 points, motivating our controlled operator sweep.
+
+\section{Method}
+\subsection{Base detector}
+We use YOLOX: a CSPDarknet backbone emitting features at strides 8/16/32, a PAFPN neck, and an
+anchor-free decoupled head with SimOTA label assignment. Label assignment and losses are held
+fixed across all experiments; they are not ablated. \pending{cite YOLOX.}
+
+\subsection{Two-stream fusion}
+RGB and thermal are processed by independent CSPDarknet backbones. Their features are merged at
+one or more stages (dark3/dark4/dark5) by a fusion operator that returns tensors of the original
+shape, so the neck and head are unchanged. \pending{final architecture figure PENDING.}
+
+\subsection{Ablation axes}
+\emph{(A) Fusion stage:} dark3 / dark4 / dark5 / all.
+\emph{(B) Fusion operator:} element-wise sum, max; concatenation$+1\times1$; learned-scalar;
+channel (SE) gating; illumination gating; and a cross-attention ceiling reference.
+\emph{(C) Weight sharing} between streams.
+\emph{(D) Misalignment:} injected spatial shift and temporal skew.
+\emph{(E) Composability:} random per-frame thermal availability at train time; evaluation with
+thermal present / absent / stale. Every operator accepts a missing stream via a validity flag.
+
+\subsection{Evaluation}
+Log-average miss rate MR$^{-2}$ over FPPI $\in[10^{-2},10^0]$ on the Reasonable subset (height
+$\geq 55$px, occlusion $\leq$ partial), reported All / Day / Night, using sanitized-train and
+improved-test annotations. Our evaluator is validated against a published method's released
+detections \pending{verification PENDING}. Every result is mean$\pm$std over $\geq$3 seeds; a
+difference below 2$\sigma$ is not treated as a result.
+
+\section{Experimental Setup}
+KAIST: 95{,}324 aligned RGB--thermal pairs; standard 2{,}252-image test split (1{,}455 day /
+797 night). Training on the sanitized annotations. Hardware: single RTX 5070 Ti (12\,GB).
+\pending{optimiser, LR schedule, epochs, batch size PENDING -- fill at Phase 1 training.}
+
+\section{Results}
+
+\subsection{Baselines and the noise floor}
+\pending{PENDING Phase 1.} RGB-only, thermal-only, and the seed standard deviation $\sigma$ that
+sets the significance bar.
+
+\begin{table}[t]\centering\small
+\caption{Single-modality baselines (MR$^{-2}$, lower better). \pending{PENDING}}
+\begin{tabular}{lccc}
+\toprule
+Model & All & Day & Night \\
+\midrule
+RGB-only     & \pending{--} & \pending{--} & \pending{--} \\
+Thermal-only & \pending{--} & \pending{--} & \pending{--} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Clean-data operator sweep (the null-control arm)}
+\pending{PENDING Phase 3.} Pre-registered expectation [LOCKED]: cheap operators fall within
+$\sim$1 MR of concatenation; the expensive ceiling gains $\leq$1--2 MR.
+
+\subsection{Misalignment (headline 1)}
+\pending{PENDING Phase 4.} MR$^{-2}$ vs.\ injected spatial shift and temporal skew, per operator.
+
+\subsection{Composability (headline 2)}
+\pending{PENDING Phase 4.} With thermal absent, the RGB path must stay within 2$\sigma$ of the
+RGB-only baseline (C1); with thermal present it must beat it, night-led (C2).
+
+\section{Discussion}
+\pending{PENDING.}
+
+\section{Conclusion}
+\pending{PENDING.}
+
+\bibliographystyle{plain}
+% \bibliography{refs}   % PENDING -- build refs.bib from docs/LITERATURE.md
+\end{document}
