@@ -1,0 +1,100 @@
+% Compiles on its own (pulls ../main.tex's preamble via subfiles) or as part of the book.
+\documentclass[../main.tex]{subfiles}
+\begin{document}
+
+\chapter{Training: The Loss and SimOTA}
+
+The detector runs but cannot learn. To learn it needs a \emph{loss} --- one number measuring how
+wrong its predictions are --- which we minimise by gradient descent. This chapter is the theory
+gate for that machinery. It is also the one place we deliberately \emph{borrow} rather than build,
+and the chapter explains both the mechanism and that choice.
+
+\section{The problem the loss must solve}
+
+Recall the head makes 6720 predictions per image, one per grid cell, each with a box, an
+objectness score, and a class score. A training image has maybe one or two real pedestrians. So
+before we can score anything, we face a question with no obvious answer:
+
+\begin{quote}
+Of the 6720 cells, \emph{which ones} are supposed to predict the pedestrian?
+\end{quote}
+
+This is \textbf{label assignment}, and it is the heart of modern detector training. Get it wrong
+and the loss is meaningless. The naive answers are both bad: ``only the single cell at the
+pedestrian's centre'' wastes all the other nearby cells that could also learn the object; ``every
+cell overlapping the box'' floods training with near-duplicate positives. We need something
+adaptive.
+
+\section{SimOTA, in words}
+
+YOLOX's answer is \textbf{SimOTA} (Simplified Optimal Transport Assignment). For one image it works
+like this:
+
+\begin{enumerate}
+  \item \textbf{Center prior.} For each ground-truth pedestrian, gather the cells whose centre
+        falls inside the box (or within a small radius of the box centre). Only these are
+        candidates --- a cell far away should never be responsible for this object.
+  \item \textbf{Cost matrix.} For every (candidate cell, pedestrian) pair, compute a cost:
+        \[
+          \text{cost} = \text{classification cost} + \lambda \cdot \text{box cost},
+        \]
+        where the box cost is $-\log(\text{IoU})$ between the cell's predicted box and the
+        pedestrian, and the classification cost is how wrong the cell's class score is. Low cost
+        = this cell is already good at predicting this pedestrian.
+  \item \textbf{Dynamic $k$.} Here is the clever part. For each pedestrian, look at its top few
+        candidate IoUs and \emph{sum} them to get an integer $k$ --- an easy, well-covered object
+        gets a larger $k$ (assign it more cells), a hard or tiny one gets a smaller $k$. Then pick
+        the $k$ lowest-cost cells as that pedestrian's positives. The number of positives per
+        object is decided \emph{per object, from the data}, not fixed by hand.
+  \item \textbf{Resolve conflicts.} If a cell got assigned to two pedestrians, keep the
+        lower-cost one. Everything not assigned is background.
+\end{enumerate}
+
+The output is a \emph{foreground mask} (which cells are positives) and, for each positive, which
+pedestrian it must predict. Now the loss is well-defined.
+
+\section{The three-part loss}
+
+With assignment done, the loss has three components, summed:
+
+\begin{itemize}
+  \item \textbf{Box loss} (positives only): $1-\text{IoU}$ between each positive cell's predicted
+        box and its assigned pedestrian. Drives the boxes to fit.
+  \item \textbf{Objectness loss} (all cells): binary cross-entropy pushing positives toward
+        ``object here'' and everything else toward ``background.'' This is what makes the sea of
+        random boxes recede at inference.
+  \item \textbf{Classification loss} (positives only): binary cross-entropy on the class scores of
+        the positive cells. (With one class this is small, but it stays for generality.)
+\end{itemize}
+
+The total is normalised by the number of positives so images with more pedestrians do not dominate.
+
+\section{Why we borrow this, and what that protects}
+
+We port SimOTA and the loss from the official YOLOX rather than reimplement them. The reasoning is
+methodological. This machinery is \emph{held identical across every experiment in the study} --- it
+is not a variable we ablate. A subtle bug in the cost matrix or the dynamic-$k$ logic would shift
+which cells become positives, and therefore move every result in the table \emph{by the same
+hidden amount}, in a way no single experiment could reveal. Reimplementing it would risk exactly
+that, for no scientific gain, and would cost days of debugging. So we borrow the fixed part and
+spend our care on the parts we vary --- the fusion.
+
+\begin{lesson}
+There is a live interaction to remember (it recurs in later chapters). Label assignment depends on
+the predictions, and fusion changes the predictions. So changing the fusion can change which cells
+SimOTA marks as positive --- producing an accuracy difference that is really an assignment
+difference, not a feature-quality difference. When a fusion ablation moves unexpectedly, inspect
+the number and location of positives before telling an architectural story about it.
+\end{lesson}
+
+\section{How we verify borrowed code}
+
+Borrowed is not the same as trusted. Two checks give us confidence the port is wired correctly:
+\begin{enumerate}
+  \item the loss is a finite scalar and gradients flow to every parameter; and
+  \item on a single image trained in a tight loop, the loss \emph{decreases} and the model
+        \emph{overfits} it --- if a model cannot memorise one image, its training is broken. This
+        ``overfit one batch'' test is the cheapest, most reliable smoke test in deep learning, and
+        it is the exit check for this chapter.
+\end{enumerate}
+\end{document}
