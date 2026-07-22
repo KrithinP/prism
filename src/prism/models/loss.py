@@ -142,13 +142,17 @@ class YOLOXLoss(nn.Module):
         iou = bboxes_iou(cand_boxes, gt_xyxy)              # (Nc, n_gt)
         iou_cost = -torch.log(iou + 1e-8)
 
-        # classification cost: predicted score vs gt onehot
-        score = (cls_logits[candidate].sigmoid() * obj_logits[candidate].sigmoid()[:, None]).sqrt()
-        gt_onehot = F.one_hot(gt_cls, self.num_classes).float()
-        cls_cost = F.binary_cross_entropy(
-            score[:, None, :].expand(-1, n_gt, -1).clamp(1e-6, 1 - 1e-6),
-            gt_onehot[None].expand(score.shape[0], -1, -1), reduction="none",
-        ).sum(-1)
+        # classification cost: predicted score vs gt onehot.
+        # BCE on sigmoided probs is unsafe under AMP autocast, and assignment should be
+        # full-precision bookkeeping anyway, so compute it in fp32 with autocast off.
+        with torch.autocast(device_type=boxes.device.type, enabled=False):
+            score = (cls_logits[candidate].float().sigmoid()
+                     * obj_logits[candidate].float().sigmoid()[:, None]).sqrt()
+            gt_onehot = F.one_hot(gt_cls, self.num_classes).float()
+            cls_cost = F.binary_cross_entropy(
+                score[:, None, :].expand(-1, n_gt, -1).clamp(1e-6, 1 - 1e-6),
+                gt_onehot[None].expand(score.shape[0], -1, -1), reduction="none",
+            ).sum(-1)
 
         is_in = (in_box | in_center)[candidate]            # (Nc, n_gt)
         cost = cls_cost + 3.0 * iou_cost + 1e5 * (~is_in)

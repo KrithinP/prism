@@ -23,6 +23,20 @@ def test_loss_is_finite_and_has_gradients():
     assert parts["num_fg"] > 0            # SimOTA assigned at least one positive
 
 
+def test_background_loss_is_sane_at_init():
+    """From-scratch, an all-background batch must not produce a giant loss.
+    Prior-bias init (head.py) keeps it small; without it, SGD diverges to NaN."""
+    torch.manual_seed(0)
+    model = YOLOX(num_classes=1)
+    lossfn = YOLOXLoss(num_classes=1)
+    imgs = torch.randn(4, 3, 512, 640)
+    empty = [torch.zeros(0, 5) for _ in range(4)]
+    loss, parts = lossfn(model(imgs), empty)
+    # Healthy floor is ~270: 4 imgs x 6720 cells x -log(0.99) with prior pi=0.01.
+    # The broken (no prior-bias) value was ~18000, so 500 cleanly separates them.
+    assert parts["obj"] < 500.0, f"background loss too large at init: {parts['obj']:.1f}"
+
+
 def test_model_can_overfit_one_image():
     """The cheapest, most reliable DL smoke test: memorise a single image."""
     torch.manual_seed(0)

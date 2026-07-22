@@ -1,0 +1,197 @@
+% Compiles on its own (pulls ../main.tex's preamble via subfiles) or as part of the book.
+\documentclass[../main.tex]{subfiles}
+\begin{document}
+
+\chapter{Training: The Loop}
+
+Chapter 6 gave us a loss that turns and gradients that flow. This chapter is the theory gate for
+the machine that runs that loss thousands of times: the training loop. It has two halves --- the
+\emph{plumbing} that feeds the model batches (the training-ready dataset), and the \emph{control}
+that drives learning (optimiser, learning rate, schedule, mixed precision, seeds). Neither is
+exotic. But from-scratch training --- our regime, chosen because the model is small (8.94M) and the
+data is small --- is fragile in exactly these knobs, so each earns its explanation.
+
+\section{From loader to batch: the training-ready dataset}
+
+The paired loader (Ch.~1) yields one frame at a time, at native size, with positives and ignore
+regions mixed together, and both modalities present. The training step wants something narrower: a
+\emph{stack} of equal-size images and a target list shaped exactly as the loss expects. Three jobs
+bridge the gap; KAIST removes the hardest.
+
+\begin{itemize}
+  \item \textbf{Resize / letterbox --- not needed here.} A batch tensor cannot be ragged, so every
+        image in a batch must share a size. Most datasets need resizing to enforce that. Every KAIST
+        frame is already $640\times512$, and $640$ and $512$ are both divisible by $32$ --- exactly
+        the total stride of the backbone's three downsampling stages. So every frame is already a
+        legal, identical-size input. (When we later \emph{inject} scale misalignment, resizing
+        returns. Not now.)
+  \item \textbf{Target formatting.} The loss wants rows $[\text{cls}, x_1, y_1, x_2, y_2]$. The
+        loader already stores boxes as $xyxy$ pixels. Two conversions remain: keep only the scored
+        positives (the real \texttt{person} boxes), and set their class index to $0$, because the
+        model has one class and it lives at index $0$.
+  \item \textbf{Collate.} PyTorch's default batcher tries to stack \emph{everything} and chokes on
+        the boxes, because one frame has two pedestrians and the next has five. So we write a tiny
+        collate function: stack the images (all legal, all $640\times512$) into one
+        $(B,C,H,W)$ tensor, and leave the targets as a plain length-$B$ list. That list-of-tensors
+        is precisely what the loss loops over, one image at a time.
+\end{itemize}
+
+The same layer picks a single modality (this is the RGB-only / thermal-only baseline) and divides
+pixels by $255$ to put them in $[0,1]$ for stable from-scratch training.
+
+\begin{lesson}
+For this baseline we \emph{drop} ignore regions from the targets entirely. That is a deliberate
+simplification, and it is not perfectly correct: a grid cell sitting inside an ignore box (a
+cyclist, a crowd blob, a \texttt{person?}) will be pushed toward ``background'' by the objectness
+loss, even though we genuinely do not know what is there. The fully-correct handling masks the
+objectness loss inside ignore regions so those cells are neither positive nor penalised --- the
+same courtesy the \emph{evaluator} already extends them (Ch.~3). We add that mask before the
+headline runs; it changes label quality, not the plumbing, so it is safe to defer past the
+first loss curve.
+\end{lesson}
+
+\section{The optimiser, and one from-scratch subtlety}
+
+We use \textbf{SGD with momentum} --- YOLOX's own choice --- not Adam. The update is ``step
+downhill, with inertia so you coast through small bumps.'' Momentum $0.9$ and Nesterov are the
+standard settings.
+
+The one subtlety that matters more from scratch than from a checkpoint: we \textbf{exempt
+BatchNorm parameters and biases from weight decay}. Weight decay gently pulls weights toward zero to
+discourage overfitting --- sensible for the large convolution kernels, harmful for BN's scale/shift
+and for biases, which must move freely to calibrate a network that began as pure noise. From a
+pretrained model those are already calibrated and the choice barely registers; from scratch,
+decaying them can stall early training. So we split parameters into two groups --- kernels get
+decay, everything one-dimensional does not --- and hand the optimiser both.
+
+\section{Learning rate and schedule: the shape that decides everything}
+
+The learning rate is the step size, and it is the single most consequential number in the run. Too
+large and the loss diverges --- and from scratch there is no good initialisation to catch the fall.
+Too small and it crawls, wasting GPU-hours. Crucially, \textbf{there is no correct value known in
+advance}: it depends on the model, the batch size, the data. From a pretrained model you could
+borrow a known-good rate; from scratch you cannot. \emph{This is the whole reason the study sweeps
+the learning rate before locking the recipe} --- it is an empirical unknown, so we measure it.
+
+The rate does not stay fixed. It follows a two-phase shape:
+
+\begin{itemize}
+  \item \textbf{Warmup} (first $\sim$5\% of steps): ramp linearly from near zero up to the target
+        rate. A freshly-initialised network emits garbage gradients in its first steps; a full-size
+        rate there can knock it into a bad region it never leaves. Warmup lets it find its footing.
+  \item \textbf{Cosine decay} (the rest): lower the rate smoothly to near zero along a cosine curve.
+        Large steps early to explore the loss landscape, tiny steps late to settle into a minimum.
+\end{itemize}
+
+We implement this as a plain multiplier on the base rate, recomputed every step. The base rate is
+the swept knob; the \emph{shape} stays fixed across all experiments.
+
+\section{Mixed precision: why 12\,GB is enough}
+
+Automatic Mixed Precision (AMP) runs most of the forward pass in 16-bit floats instead of 32-bit:
+roughly half the memory and, on the laptop's Blackwell tensor cores, close to double the
+throughput. That is the difference between a usable batch size and an out-of-memory crash. The one
+hazard is that 16-bit floats underflow --- very small gradients round to zero. A \textbf{gradient
+scaler} sidesteps this: multiply the loss up before the backward pass so gradients land in the
+representable range, then divide it back out before the optimiser steps. It is boilerplate, but it
+is the reason this model trains on this card at all.
+
+\section{Seeds: the machinery behind ``5 seeds every experiment''}
+
+One call at the top of the run seeds Python, NumPy, and Torch together. Same seed, same run. This
+is not a nicety --- it is the foundation of the study's statistics. We run seeds $0$ through $4$ on
+every experiment, report mean $\pm$ standard deviation, and treat a two-sigma band as the bar a
+result must clear. Without reproducible seeds you cannot separate a real architectural improvement
+from lucky initialisation, and the published KAIST literature --- which reports single-run deltas
+of a few tenths of an MR point with no error bars anywhere --- is precisely the failure mode we
+refuse to repeat.
+
+\section{The exit check: watch it descend before you spend}
+
+The chapter's discipline, and its exit check, is an ordering rule:
+
+\begin{quote}
+Before launching the $5$-seed $\times$ learning-rate sweep, run the loop once on a small subset and
+\emph{watch the loss curve descend.}
+\end{quote}
+
+This is the ``overfit one image'' test of Ch.~6, scaled up to ``overfit a few hundred frames.'' If
+the loss falls steadily on a subset of real KAIST data --- objectness dropping, IoU loss dropping,
+the positive count staying sane --- then the loop, the dataset layer, the AMP path, and the
+schedule are all wired correctly, and only then do we spend real GPU-hours on the sweep. Never burn
+a $5$-seed budget on a loop you have not first watched turn.
+
+\section{The first run failed --- and taught the chapter's real lesson}
+
+The first smoke run did \emph{not} descend. Two things went wrong, and the second is the most
+instructive failure in the project so far.
+
+\textbf{Symptom one: \texttt{fg=0} on every step.} The subset was the first $300$ frames in sorted
+order, which fell inside a stretch of pedestrian-free frames at the start of \texttt{set00/V000}.
+SimOTA had nothing to assign because there were no pedestrians. This is why the smoke now filters
+to frames that contain at least one scored person before taking its subset --- a plumbing test needs
+something to learn.
+
+\textbf{Symptom two: \texttt{loss=nan} from the moment warmup reached full learning rate.} Probing
+one batch revealed the cause: the objectness loss at initialisation was \emph{eighteen thousand}.
+At birth the head's output biases were zero, so every cell emitted a logit near $0$ and
+$\sigma(0)=0.5$ --- the newborn model announced ``50\% chance of a pedestrian'' in all $6720$ cells.
+The background penalty for that is $\approx 0.69$ per cell $\times\,6720\times B$ images $\approx
+18{,}000$. That loss produced an enormous gradient; SGD at the target rate, amplified by the fp16
+path, threw the weights to infinity within a few steps.
+
+The fix is the \textbf{prior-probability bias initialisation} from RetinaNet, used by YOLOX itself.
+Initialise the objectness and class output biases so that at birth every cell predicts ``almost
+certainly background'':
+\[
+  b = -\log\frac{1-\pi}{\pi},\qquad \pi = 0.01 \;\Rightarrow\; b \approx -4.595,\quad \sigma(b)=0.01.
+\]
+Now each cell starts near the true object rate (a handful of pedestrians among thousands of cells),
+the initial background loss falls roughly $50\times$, gradients stay tame, and warmup does its job.
+
+\begin{lesson}
+The overfit-one-image test of Ch.~6 was green, yet real training diverged. The test used
+\emph{AdamW}, which divides each gradient by its own recent magnitude and so shrugged off an
+$18{,}000$ loss and still learned. Real training uses \emph{SGD}, which applies the raw gradient,
+and batches of mostly-background --- exactly the regime that exposes a missing prior-bias init. A
+green suite proves the cases you tested, not correctness. The all-background, SGD, from-scratch case
+was not in the suite; now it is, as a regression test asserting the initial background loss stays
+small. When a unit test and a real run disagree, the real run is right --- find what the test's
+easier conditions were hiding.
+\end{lesson}
+
+\section{The fixed loop descends}
+
+With the prior-bias init in place (and a second, smaller fix: SimOTA's internal cross-entropy cost
+must run with autocast disabled, because binary cross-entropy on already-sigmoided probabilities is
+unsafe under mixed precision), the smoke was re-run on $300$ pedestrian-bearing frames for $20$
+epochs. It descended cleanly:
+
+\begin{center}
+\begin{tabular}{lccccc}
+\toprule
+ & \texttt{loss} & \texttt{obj} & \texttt{iou} & \texttt{cls} & \texttt{fg} \\
+\midrule
+start (step 20)  & 42.2 & 37.4 & 0.70 & 1.35 & 13 \\
+end (step 740)   & 1.10 & 0.16 & 0.12 & 0.36 & $\sim$85 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Every reading is a health sign. The objectness loss started in the low tens --- not the eighteen
+thousand of the broken run --- confirming the prior-bias fix, then fell $\sim$230$\times$ as the
+model learned to silence the background. The box loss fell from $\approx 0.70$ (boxes barely
+touching the pedestrian) to $\approx 0.12$ ($\approx$88\% IoU). The positive count \emph{rose} from
+$13$ to $\sim$85: as predictions improve, more cells clear SimOTA's IoU bar and dynamic-$k$ hands
+out more positives --- assignment and learning reinforcing each other. No NaN, and the learning-rate
+schedule ramped to $0.01$ and cosine-decayed to zero exactly as designed.
+
+\begin{lesson}
+This is memorisation, not detection. Three hundred frames for twenty epochs with no validation set:
+the model overfit a tiny slice, which is precisely what this gate is meant to prove --- that the
+loop \emph{can} learn --- and nothing more. The low final loss says the machine works; it says
+nothing about whether the detector generalises. That question belongs to the next phase: train on
+the proper KAIST train split and report MR$^{-2}$ on the held-out test set.
+\end{lesson}
+
+\end{document}

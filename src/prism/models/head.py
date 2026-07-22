@@ -8,6 +8,8 @@ At every cell of every scale, three separate branches predict:
 """
 from __future__ import annotations
 
+import math
+
 import torch
 import torch.nn as nn
 
@@ -37,6 +39,16 @@ class DecoupledHead(nn.Module):
             self.cls_preds.append(nn.Conv2d(width, num_classes, 1))
             self.reg_preds.append(nn.Conv2d(width, 4, 1))
             self.obj_preds.append(nn.Conv2d(width, 1, 1))
+
+        # Prior-probability bias init (RetinaNet/YOLOX). At birth every cell should
+        # predict "almost certainly background" (p ~= 0.01), or the from-scratch
+        # objectness loss starts ~50x too large and SGD diverges to NaN. See Ch.7.
+        prior = 1e-2
+        bias = -math.log((1 - prior) / prior)   # ~= -4.595
+        for m in self.cls_preds:
+            nn.init.constant_(m.bias, bias)
+        for m in self.obj_preds:
+            nn.init.constant_(m.bias, bias)
 
     def forward(self, feats):
         """feats: (p3, p4, p5) from the neck.
