@@ -45,8 +45,11 @@ def test_model_can_overfit_one_image():
     img, targets = _one_sample()
     opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
+    # 150 steps, not 60: with prior-bias init (head.py) the model starts confidently
+    # predicting background, so it must climb out of the -4.595 bias before it can fit
+    # the box. Correct behaviour, just a slower start than the pre-fix model had.
     first = None
-    for _ in range(60):
+    for _ in range(150):
         opt.zero_grad()
         loss, _ = lossfn(model(img), targets)
         loss.backward()

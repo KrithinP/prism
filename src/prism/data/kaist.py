@@ -43,15 +43,23 @@ class PairedKAIST(Dataset):
       annotations-xml-new-sanitized/setXX/VYYY/IZZZZZ.xml
     """
 
-    def __init__(self, root: str, ann_dirname: str = "annotations-xml-new-sanitized"):
+    def __init__(self, root: str, ann_dirname: str = "annotations-xml-new-sanitized",
+                 split_file: str | None = None):
         self.root = Path(root)
         self.ann_root = self.root / ann_dirname
-        # Discover every frame that has BOTH modalities on disk. (The preview set only
-        # holds set04/V001, while the split files name other sets — so for now we glob
-        # what actually exists rather than trust a split file.)
-        vis = sorted((self.root / "images").rglob(f"{VISIBLE_DIRNAME}/*.jpg"))
-        self.ids = [self._id_from_visible(p) for p in vis
-                    if p.with_name(p.name).parent.parent.joinpath(LWIR_DIRNAME, p.name).exists()]
+        if split_file is not None:
+            # Obey the official protocol list (set-split + frame-sampling baked in).
+            ids = [ln.strip() for ln in Path(split_file).read_text().splitlines() if ln.strip()]
+            self.ids = [fid for fid in ids if self._pair_exists(fid)]
+        else:
+            # Fallback: discover every frame that has BOTH modalities on disk.
+            vis = sorted((self.root / "images").rglob(f"{VISIBLE_DIRNAME}/*.jpg"))
+            self.ids = [self._id_from_visible(p) for p in vis
+                        if p.with_name(p.name).parent.parent.joinpath(LWIR_DIRNAME, p.name).exists()]
+
+    def _pair_exists(self, fid: str) -> bool:
+        vis_p, lwir_p, _ = self._paths(fid)
+        return vis_p.exists() and lwir_p.exists()
 
     @staticmethod
     def _id_from_visible(p: Path) -> str:
@@ -85,3 +93,20 @@ class PairedKAIST(Dataset):
             "classes": torch.from_numpy(ann["classes"]),
             "occlusion": torch.from_numpy(ann["occlusion"]),
         }
+
+
+# Official KAIST protocol splits: (list file, annotation source).
+# Train -> sanitized (Li/MSDS-RCNN). Test -> improved (Liu 2018) -- VERIFY this dir
+# is the improved-test set before trusting test MR^-2 (the "easy to get backwards" trap).
+_SPLITS = {
+    "train":      ("train-all-02.txt", "annotations-xml-new-sanitized"),
+    "test":       ("test-all-20.txt",  "annotations-xml-new"),
+    "test-day":   ("test-day-20.txt",  "annotations-xml-new"),
+    "test-night": ("test-night-20.txt", "annotations-xml-new"),
+}
+
+
+def kaist_split(root: str, split: str) -> "PairedKAIST":
+    """Build a PairedKAIST for a named protocol split ('train'/'test'/'test-day'/'test-night')."""
+    fname, ann = _SPLITS[split]
+    return PairedKAIST(root, ann_dirname=ann, split_file=str(Path(root) / "imageSets" / fname))
