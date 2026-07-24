@@ -39,31 +39,49 @@ def main():
 
     OUT.mkdir(parents=True, exist_ok=True)
     ckpt_dir = OUT / f"{a.modality}_lrsweep"
+    csv_path = OUT / f"{a.modality}_lrsweep.csv"
     rows = []
+
+    def flush():
+        """Write results after EVERY lr, so a later crash cannot lose earlier runs."""
+        ordered = sorted(rows, key=lambda r: r["mr_all"])   # lower MR^-2 is better
+        with csv_path.open("w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=["lr", "mr_all", "mr_day", "mr_night"])
+            w.writeheader(); w.writerows(ordered)
+        (OUT / f"{a.modality}_lrsweep.json").write_text(json.dumps(ordered, indent=2))
+        return ordered
 
     for lr in a.lrs:
         tag = f"lr{lr:g}"
         print(f"\n{'='*70}\n  LR SWEEP: {a.modality}  lr={lr:g}  epochs={a.epochs}\n{'='*70}")
-        train(a.root, modality=a.modality, lr=lr, epochs=a.epochs,
-              batch_size=a.batch_size, seed=a.seed, limit=a.limit,
-              out=str(ckpt_dir / tag))
         ckpt = ckpt_dir / tag / f"{a.modality}_seed{a.seed}.pt"
+        try:
+            if ckpt.exists():
+                # Resume-friendly: an already-trained lr is not retrained (40 min each).
+                print(f"  [skip training] checkpoint exists: {ckpt}")
+            else:
+                train(a.root, modality=a.modality, lr=lr, epochs=a.epochs,
+                      batch_size=a.batch_size, seed=a.seed, limit=a.limit,
+                      out=str(ckpt_dir / tag))
 
-        _, res = evaluate_checkpoint(str(ckpt), a.root, a.modality,
-                                     batch_size=a.batch_size)
-        row = {"lr": lr,
-               "mr_all": res["test"]["mr"],
-               "mr_day": res["test-day"]["mr"],
-               "mr_night": res["test-night"]["mr"]}
-        rows.append(row)
-        print(f"  -> lr={lr:g}  MR^-2 All={row['mr_all']*100:.2f}%  "
-              f"Day={row['mr_day']*100:.2f}%  Night={row['mr_night']*100:.2f}%")
+            _, res = evaluate_checkpoint(str(ckpt), a.root, a.modality,
+                                         batch_size=a.batch_size)
+            row = {"lr": lr,
+                   "mr_all": res["test"]["mr"],
+                   "mr_day": res["test-day"]["mr"],
+                   "mr_night": res["test-night"]["mr"]}
+            rows.append(row)
+            print(f"  -> lr={lr:g}  MR^-2 All={row['mr_all']*100:.2f}%  "
+                  f"Day={row['mr_day']*100:.2f}%  Night={row['mr_night']*100:.2f}%")
+        except Exception as e:
+            # One bad lr must not throw away the hours already spent on the others.
+            print(f"  !! lr={lr:g} FAILED: {type(e).__name__}: {e}")
+        flush()
 
-    rows.sort(key=lambda r: r["mr_all"])          # lower MR^-2 is better
-    csv_path = OUT / f"{a.modality}_lrsweep.csv"
-    with csv_path.open("w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=["lr", "mr_all", "mr_day", "mr_night"])
-        w.writeheader(); w.writerows(rows)
+    rows = flush()
+    if not rows:
+        print("\nNo lr completed successfully.")
+        return
 
     print(f"\n{'='*70}\n  RESULT ({a.modality}, seed {a.seed}, {a.epochs} epochs)\n{'='*70}")
     print(f"{'lr':>10}{'MR^-2 All':>12}{'Day':>10}{'Night':>10}")
@@ -73,7 +91,6 @@ def main():
     best = rows[0]
     print(f"\nBEST lr = {best['lr']:g}  (MR^-2 All {best['mr_all']*100:.2f}%)")
     print(f"saved {csv_path}")
-    (OUT / f"{a.modality}_lrsweep.json").write_text(json.dumps(rows, indent=2))
 
 
 if __name__ == "__main__":
