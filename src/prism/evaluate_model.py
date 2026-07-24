@@ -29,7 +29,7 @@ import torch
 from prism.data.kaist import kaist_split
 from prism.models.yolox import YOLOX
 from prism.models.decode import decode_outputs, postprocess
-from prism.eval.evaluate import evaluate
+from prism.eval.evaluate import evaluate, evaluate_subsets
 
 # Low on purpose -- see note (1) in the module docstring.
 EVAL_CONF_THR = 0.001
@@ -75,7 +75,8 @@ def evaluate_checkpoint(ckpt_path, root, modality=None, splits=("test", "test-da
         base = kaist_split(root, split)
         frames = collect_frames(model, base, modality, device, batch_size)
         n_det = sum(len(f["det_scores"]) for f in frames)
-        results[split] = {"mr": evaluate(frames), "frames": len(frames), "dets": n_det}
+        results[split] = {"mr": evaluate(frames), "frames": len(frames), "dets": n_det,
+                          "subsets": evaluate_subsets(frames)}
     return modality, results
 
 
@@ -93,8 +94,20 @@ def main():
     print(f"\nMR^-2 (Reasonable, lower is better) -- {a.ckpt}  [{modality}]")
     print(f"{'subset':<8}{'MR^-2':>10}{'frames':>9}{'dets':>10}")
     for split, r in res.items():
-        pct = r["mr"] * 100
-        print(f"{label[split]:<8}{pct:>9.2f}%{r['frames']:>9}{r['dets']:>10}")
+        print(f"{label[split]:<8}{r['mr']*100:>9.2f}%{r['frames']:>9}{r['dets']:>10}")
+
+    # Full standard suite: scale (near/medium/far) and occlusion (none/partial/heavy).
+    order = ["reasonable", "near", "medium", "far", "occ-none", "occ-partial", "occ-heavy"]
+    print(f"\nFull KAIST condition suite -- MR^-2 % (n = scored pedestrians)")
+    print(f"{'condition':<13}" + "".join(f"{label[s]:>18}" for s in res))
+    for name in order:
+        cells = ""
+        for s, r in res.items():
+            mr, npos = r["subsets"][name]
+            cells += f"{mr*100:>11.2f}% ({npos:>3})" if npos else f"{'--':>18}"
+        print(f"{name:<13}{cells}")
+    print("\nRead n before the number: Far and Heavy usually have very few scored"
+          "\npedestrians, which makes their MR^-2 noisy and near-meaningless.")
     print("\nNOTE: comparable to published numbers only once the sanitized-train /"
           "\n      improved-test annotations are installed (see decisions log 2026-07-24).")
 
