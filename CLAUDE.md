@@ -13,12 +13,42 @@ grid, honest metrics — rather than reasoning about fusion from an armchair.
 
 Target: **report + reproducible repo in 4–6 weeks** (started 2026-07-13).
 
-## Status (2026-07-21)
+## Status (2026-07-24)
 
-Phase 0 (data + MR⁻² evaluator) done; **Phase 1 model built from scratch** — blocks → CSPDarknet →
-PAFPN → decoupled anchor-free head → assembled YOLOX (**8.94M params**, matches YOLOX-S) → decoder
-→ runs end-to-end. **22 tests green** (`make test`). Full 36GB KAIST verified + extracted.
-**Next: port loss + SimOTA, then train from-scratch RGB-only / thermal-only baselines.**
+Phase 0 + Phase 1 done. **The detector trains from scratch and the metric pipeline is wired
+end-to-end.** blocks → CSPDarknet → PAFPN → decoupled head → YOLOX (**8.94M params**) → decoder →
+loss + SimOTA → training loop → protocol splits → MR⁻² evaluation. **32 tests green**
+(`make test`). Full 36GB KAIST verified + extracted at `data/raw/kaist-cvpr15`.
+
+Verified smoke (thermal, 300 pedestrian frames, 20 epochs): loss 42.2→1.10, obj 37.4→0.16,
+iou 0.70→0.12, no NaN; the trained model puts boxes on the pedestrians
+(`docs/figures/trained_before_after.png`). That is *memorization*, not detection — the gate only
+proves the loop learns.
+
+**Two from-scratch bugs found and fixed here (both regression-tested):**
+1. **Missing prior-probability bias init.** Head obj/cls biases started at 0 → σ(0)=0.5 → every
+   cell screamed "object" → all-background objectness loss ≈ **18,000** → SGD diverged to NaN.
+   Fix: init to −log((1−π)/π), π=0.01 (≈−4.595). The overfit-one-image test missed it because it
+   used **AdamW** (self-normalizes gradient scale); **SGD** on background batches exposed it.
+   *Lesson: a green suite proves the cases you tested, not correctness.*
+2. **AMP-unsafe BCE.** SimOTA's internal `F.binary_cross_entropy` on sigmoided probabilities is
+   forbidden under autocast; the cost matrix now runs in fp32 with autocast disabled.
+
+**Next: LR sweep (`scripts/sweep_lr.py`) → lock the recipe → from-scratch RGB-only and
+thermal-only baselines × 5 seeds → MR⁻² with the noise floor.** Then Phase 2 (two-stream fusion).
+
+### ⚠ Annotation comparability (verified 2026-07-24 — read before quoting any number)
+
+`annotations-xml-new-sanitized` on this disk is a **byte-identical copy** of
+`annotations-xml-new` (95,324 XMLs each, zero differing files). We hold **one** annotation set
+under two names, so the train=sanitized / test=improved mapping in `kaist_split()` is a **no-op**.
+
+- **Internal comparisons stay valid** — every experiment shares the same annotations, so fusion
+  A-vs-B, the misalignment sweep, and the 5-seed noise floor are unaffected. Proceed.
+- **Cross-paper comparison is NOT valid yet**, and neither is the open evaluator verification
+  (which works by reproducing a published number). Needs the real **sanitized-train** (Li et
+  al./MSDS-RCNN) and **improved-test** (Liu et al. 2018) annotation sets — download links in the
+  decisions log (2026-07-24). Installing them is a one-line change in `_SPLITS`.
 
 **Locked training directives (Soham, see decisions log):** train **from scratch** (small model +
 small data); **5 seeds on every experiment** (mean±std, 2σ bar); small **LR + LR-decay sweep**

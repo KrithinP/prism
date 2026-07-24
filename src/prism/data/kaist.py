@@ -96,8 +96,19 @@ class PairedKAIST(Dataset):
 
 
 # Official KAIST protocol splits: (list file, annotation source).
-# Train -> sanitized (Li/MSDS-RCNN). Test -> improved (Liu 2018) -- VERIFY this dir
-# is the improved-test set before trusting test MR^-2 (the "easy to get backwards" trap).
+#
+# WARNING (verified 2026-07-22): on this disk `annotations-xml-new-sanitized` is a
+# byte-identical COPY of `annotations-xml-new` -- all 95,324 XMLs match, the only
+# difference being a stray .lnk file. So the train=sanitized / test=improved mapping
+# below is currently a NO-OP: we hold ONE annotation set under two names.
+#
+# Consequence: internal comparisons (fusion op A vs B, misalignment sweep) stay valid,
+# because every experiment shares the same annotations. What is NOT yet valid is
+# comparing our MR^-2 to published numbers -- that needs the real
+#   * sanitized TRAIN annotations (Li et al. / MSDS-RCNN), and
+#   * improved TEST annotations  (Liu et al. 2018).
+# Both are separate downloads. The structure below is kept so that dropping the real
+# annotation dirs in place is a one-line change. See decisions log.
 _SPLITS = {
     "train":      ("train-all-02.txt", "annotations-xml-new-sanitized"),
     "test":       ("test-all-20.txt",  "annotations-xml-new"),

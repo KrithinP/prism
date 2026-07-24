@@ -17,7 +17,7 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from prism.data.kaist import PairedKAIST
+from prism.data.kaist import PairedKAIST, kaist_split
 from prism.data.detection import DetectionDataset, detection_collate
 from prism.data.transforms import Compose, PairedHFlip, RGBPhotometric
 from prism.models.yolox import YOLOX
@@ -68,12 +68,16 @@ def positive_indices(base):
 
 
 def train(root, modality="rgb", lr=0.01, epochs=10, batch_size=8,
-          seed=0, limit=None, out="checkpoints", positives_only=False):
+          seed=0, limit=None, out="checkpoints", positives_only=False,
+          split="train"):
     set_seed(seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     aug = Compose([PairedHFlip(0.5), RGBPhotometric(0.2, 0.2)])
-    base = PairedKAIST(root)
+    # Official protocol split: sets 00-05, every 2nd frame, sanitized annotations.
+    # Real runs use ALL train frames -- background-only frames are fine (and needed)
+    # now that the prior-bias init keeps the from-scratch objectness loss sane.
+    base = kaist_split(root, split)
     ds = DetectionDataset(base, modality=modality, transforms=aug)
     idx = positive_indices(base) if positives_only else list(range(len(ds)))
     if limit:                                    # smoke mode: overfit a few hundred frames
@@ -130,9 +134,11 @@ def main():
     ap.add_argument("--out", default="checkpoints")
     ap.add_argument("--positives-only", action="store_true",
                     help="restrict to frames containing >=1 pedestrian (for the smoke)")
+    ap.add_argument("--split", default="train",
+                    choices=["train", "test", "test-day", "test-night"])
     a = ap.parse_args()
     train(a.root, a.modality, a.lr, a.epochs, a.batch_size, a.seed, a.limit, a.out,
-          a.positives_only)
+          a.positives_only, a.split)
 
 
 if __name__ == "__main__":

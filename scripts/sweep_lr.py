@@ -1,0 +1,80 @@
+"""Soham's LR sweep: find the from-scratch learning rate before locking the recipe.
+
+From scratch there is no pretrained model whose known-good LR we can borrow, so the
+rate is an empirical unknown and must be measured. This trains one short run per
+candidate LR (single seed -- the 5-seed protocol applies to the FINAL experiments,
+not to recipe selection) and reports MR^-2 on the test split for each.
+
+The winner becomes the fixed LR for every experiment in the study. Selection uses a
+SINGLE seed on purpose: we are choosing a hyperparameter, not claiming a result.
+
+Run:
+  PYTHONPATH= .venv/bin/python scripts/sweep_lr.py --modality thermal --epochs 8
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+from pathlib import Path
+
+from prism.train import train
+from prism.evaluate_model import evaluate_checkpoint
+
+DEFAULT_LRS = [0.04, 0.02, 0.01, 0.005, 0.0025]
+OUT = Path("outputs/sweeps")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--root", default="data/raw/kaist-cvpr15")
+    ap.add_argument("--modality", default="thermal", choices=["rgb", "thermal"])
+    ap.add_argument("--epochs", type=int, default=8)
+    ap.add_argument("--batch-size", type=int, default=8)
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--limit", type=int, default=None,
+                    help="optional: train on first N frames (faster, rougher sweep)")
+    ap.add_argument("--lrs", type=float, nargs="+", default=DEFAULT_LRS)
+    a = ap.parse_args()
+
+    OUT.mkdir(parents=True, exist_ok=True)
+    ckpt_dir = OUT / f"{a.modality}_lrsweep"
+    rows = []
+
+    for lr in a.lrs:
+        tag = f"lr{lr:g}"
+        print(f"\n{'='*70}\n  LR SWEEP: {a.modality}  lr={lr:g}  epochs={a.epochs}\n{'='*70}")
+        train(a.root, modality=a.modality, lr=lr, epochs=a.epochs,
+              batch_size=a.batch_size, seed=a.seed, limit=a.limit,
+              out=str(ckpt_dir / tag))
+        ckpt = ckpt_dir / tag / f"{a.modality}_seed{a.seed}.pt"
+
+        _, res = evaluate_checkpoint(str(ckpt), a.root, a.modality,
+                                     batch_size=a.batch_size)
+        row = {"lr": lr,
+               "mr_all": res["test"]["mr"],
+               "mr_day": res["test-day"]["mr"],
+               "mr_night": res["test-night"]["mr"]}
+        rows.append(row)
+        print(f"  -> lr={lr:g}  MR^-2 All={row['mr_all']*100:.2f}%  "
+              f"Day={row['mr_day']*100:.2f}%  Night={row['mr_night']*100:.2f}%")
+
+    rows.sort(key=lambda r: r["mr_all"])          # lower MR^-2 is better
+    csv_path = OUT / f"{a.modality}_lrsweep.csv"
+    with csv_path.open("w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=["lr", "mr_all", "mr_day", "mr_night"])
+        w.writeheader(); w.writerows(rows)
+
+    print(f"\n{'='*70}\n  RESULT ({a.modality}, seed {a.seed}, {a.epochs} epochs)\n{'='*70}")
+    print(f"{'lr':>10}{'MR^-2 All':>12}{'Day':>10}{'Night':>10}")
+    for r in rows:
+        print(f"{r['lr']:>10g}{r['mr_all']*100:>11.2f}%{r['mr_day']*100:>9.2f}%"
+              f"{r['mr_night']*100:>9.2f}%")
+    best = rows[0]
+    print(f"\nBEST lr = {best['lr']:g}  (MR^-2 All {best['mr_all']*100:.2f}%)")
+    print(f"saved {csv_path}")
+    (OUT / f"{a.modality}_lrsweep.json").write_text(json.dumps(rows, indent=2))
+
+
+if __name__ == "__main__":
+    main()
