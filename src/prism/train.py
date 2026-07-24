@@ -28,8 +28,16 @@ class Diverged(RuntimeError):
     """Training blew up at this learning rate. A finding, not a bug."""
 
 
-# Healthy loss on this task sits in the single digits; hundreds means it is running away.
-DIVERGENCE_LOSS_LIMIT = 500.0
+# Divergence must be judged on a SMOOTHED loss, never a single batch.
+# The loss is (5*iou + obj + cls) / num_fg, so a batch holding only one or two
+# assignable pedestrians divides by a tiny number and legitimately reads in the
+# hundreds with nothing wrong. A first attempt at this guard used a single-batch
+# limit of 500 and killed every run at step 22 (2026-07-24).
+# Real divergence looks different: sustained growth (obj 12 -> 989 over ~300 steps),
+# which drags the running average up and holds it there.
+DIVERGENCE_EMA_LIMIT = 300.0
+DIVERGENCE_EMA_BETA = 0.98
+DIVERGENCE_GRACE_STEPS = 200      # don't judge during warmup at all
 
 
 def set_seed(seed: int):
@@ -129,6 +137,7 @@ def train(root, modality="rgb", lr=0.01, epochs=10, batch_size=8,
     total_steps = epochs * len(loader)
     warmup_steps = min(500, max(1, total_steps // 20))   # ~5% warmup
     step = 0
+    loss_ema = None                                      # smoothed loss, for divergence
     for epoch in range(epochs):
         for imgs, targets in loader:
             imgs = imgs.to(device)
@@ -143,11 +152,14 @@ def train(root, modality="rgb", lr=0.01, epochs=10, batch_size=8,
             # here and stop cleanly, before NaNs propagate into kernels that abort the
             # process. Seen 2026-07-24: lr=0.02 ran obj 12 -> 989 and took down the whole
             # sweep via a device-side assert.
+            lv = loss.item()
             if not torch.isfinite(loss):
                 raise Diverged(f"non-finite loss at step {step} (lr={lr})")
-            if loss.item() > DIVERGENCE_LOSS_LIMIT:
-                raise Diverged(f"loss {loss.item():.1f} exceeded "
-                               f"{DIVERGENCE_LOSS_LIMIT} at step {step} (lr={lr})")
+            loss_ema = lv if loss_ema is None else \
+                DIVERGENCE_EMA_BETA * loss_ema + (1 - DIVERGENCE_EMA_BETA) * lv
+            if step > DIVERGENCE_GRACE_STEPS and loss_ema > DIVERGENCE_EMA_LIMIT:
+                raise Diverged(f"loss EMA {loss_ema:.1f} exceeded {DIVERGENCE_EMA_LIMIT} "
+                               f"at step {step} (lr={lr}) -- sustained blow-up")
 
             scaler.scale(loss).backward()
             scaler.unscale_(opt)                  # undo AMP scaling before clipping
