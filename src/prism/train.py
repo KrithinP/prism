@@ -96,6 +96,9 @@ def train(root, modality="rgb", lr=0.01, epochs=10, batch_size=8,
           split="train", allow_cpu=False):
     set_seed(seed)
     device = require_device(allow_cpu)
+    # Create the checkpoint dir UP FRONT: a bad path must fail in a second, not after
+    # an hour of training (it did exactly that on 2026-07-24 and cost a full 8-epoch run).
+    Path(out).mkdir(parents=True, exist_ok=True)
 
     aug = Compose([PairedHFlip(0.5), RGBPhotometric(0.2, 0.2)])
     # Official protocol split: sets 00-05, every 2nd frame, sanitized annotations.
@@ -139,7 +142,7 @@ def train(root, modality="rgb", lr=0.01, epochs=10, batch_size=8,
                       f"iou{parts['iou']:.3f} obj{parts['obj']:.3f} "
                       f"cls{parts['cls']:.3f} fg{parts['num_fg']}")
 
-    Path(out).mkdir(exist_ok=True)
+    Path(out).mkdir(parents=True, exist_ok=True)   # parents: sweep uses nested dirs
     ckpt = Path(out) / f"{modality}_seed{seed}.pt"
     torch.save({"model": model.state_dict(), "modality": modality, "seed": seed}, ckpt)
     print(f"saved {ckpt}")
