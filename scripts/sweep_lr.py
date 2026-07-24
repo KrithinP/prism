@@ -16,6 +16,9 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from prism.train import train
@@ -60,9 +63,22 @@ def main():
                 # Resume-friendly: an already-trained lr is not retrained (40 min each).
                 print(f"  [skip training] checkpoint exists: {ckpt}")
             else:
-                train(a.root, modality=a.modality, lr=lr, epochs=a.epochs,
-                      batch_size=a.batch_size, seed=a.seed, limit=a.limit,
-                      out=str(ckpt_dir / tag))
+                # Train in a SEPARATE PROCESS. A CUDA device-side assert corrupts the
+                # context for the whole process, so an in-process crash at one lr kills
+                # every later lr too (it did, 2026-07-24). Isolation makes each lr
+                # independent: a diverged run costs that run only.
+                cmd = [sys.executable, "-m", "prism.train",
+                       "--root", a.root, "--modality", a.modality,
+                       "--lr", str(lr), "--epochs", str(a.epochs),
+                       "--batch-size", str(a.batch_size), "--seed", str(a.seed),
+                       "--out", str(ckpt_dir / tag)]
+                if a.limit:
+                    cmd += ["--limit", str(a.limit)]
+                env = dict(os.environ, PYTHONPATH="")
+                proc = subprocess.run(cmd, env=env)
+                if proc.returncode != 0:
+                    raise RuntimeError(f"training exited with code {proc.returncode} "
+                                       f"(diverged or crashed -- see output above)")
 
             _, res = evaluate_checkpoint(str(ckpt), a.root, a.modality,
                                          batch_size=a.batch_size)

@@ -148,6 +148,12 @@ class YOLOXLoss(nn.Module):
         with torch.autocast(device_type=boxes.device.type, enabled=False):
             score = (cls_logits[candidate].float().sigmoid()
                      * obj_logits[candidate].float().sigmoid()[:, None]).sqrt()
+            # F.binary_cross_entropy carries a DEVICE-SIDE assert that its input is in
+            # [0,1]. If training diverges the logits go NaN, clamp propagates NaN, the
+            # assert fires -- and a device-side assert corrupts the CUDA context for the
+            # entire process, killing every subsequent run. nan_to_num keeps divergence a
+            # recoverable Python-level event (train() then detects the non-finite loss).
+            score = torch.nan_to_num(score, nan=0.0, posinf=1.0, neginf=0.0)
             gt_onehot = F.one_hot(gt_cls, self.num_classes).float()
             cls_cost = F.binary_cross_entropy(
                 score[:, None, :].expand(-1, n_gt, -1).clamp(1e-6, 1 - 1e-6),

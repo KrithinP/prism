@@ -24,6 +24,14 @@ from prism.models.yolox import YOLOX
 from prism.models.loss import YOLOXLoss
 
 
+class Diverged(RuntimeError):
+    """Training blew up at this learning rate. A finding, not a bug."""
+
+
+# Healthy loss on this task sits in the single digits; hundreds means it is running away.
+DIVERGENCE_LOSS_LIMIT = 500.0
+
+
 def set_seed(seed: int):
     random.seed(seed)
     np.random.seed(seed)
@@ -130,6 +138,17 @@ def train(root, modality="rgb", lr=0.01, epochs=10, batch_size=8,
             opt.zero_grad()
             with torch.amp.autocast(device, enabled=(device == "cuda")):
                 loss, parts = lossfn(model(imgs), targets)
+
+            # A diverged run is a RESULT ("this lr is unstable"), not a crash. Detect it
+            # here and stop cleanly, before NaNs propagate into kernels that abort the
+            # process. Seen 2026-07-24: lr=0.02 ran obj 12 -> 989 and took down the whole
+            # sweep via a device-side assert.
+            if not torch.isfinite(loss):
+                raise Diverged(f"non-finite loss at step {step} (lr={lr})")
+            if loss.item() > DIVERGENCE_LOSS_LIMIT:
+                raise Diverged(f"loss {loss.item():.1f} exceeded "
+                               f"{DIVERGENCE_LOSS_LIMIT} at step {step} (lr={lr})")
+
             scaler.scale(loss).backward()
             scaler.unscale_(opt)                  # undo AMP scaling before clipping
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
