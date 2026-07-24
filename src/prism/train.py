@@ -67,11 +67,35 @@ def positive_indices(base):
     return keep
 
 
+def require_device(allow_cpu=False):
+    """Refuse to train on CPU unless explicitly allowed.
+
+    A silent CPU fallback is worse than a crash: a full run is ~100x slower and looks
+    like the model is merely slow to converge. This bit us on 2026-07-24 when an NVIDIA
+    driver upgrade left the loaded kernel module (580.159.03) out of sync with the
+    userspace libs (580.173.02) -- nvidia-smi reported "Driver/library version mismatch",
+    torch.cuda.is_available() went False, and a sweep started grinding on CPU. Fix was a
+    reboot. Fail loudly instead.
+    """
+    if torch.cuda.is_available():
+        return "cuda"
+    if allow_cpu:
+        print("WARNING: training on CPU (--allow-cpu). This will be very slow.")
+        return "cpu"
+    raise RuntimeError(
+        "CUDA is not available -- refusing to train on CPU.\n"
+        "  Check:  nvidia-smi   (a 'Driver/library version mismatch' means the loaded\n"
+        "          kernel module and the installed userspace driver disagree -- reboot)\n"
+        "  Then:   python -c \"import torch; print(torch.cuda.is_available())\"\n"
+        "  Override with --allow-cpu if you really mean it."
+    )
+
+
 def train(root, modality="rgb", lr=0.01, epochs=10, batch_size=8,
           seed=0, limit=None, out="checkpoints", positives_only=False,
-          split="train"):
+          split="train", allow_cpu=False):
     set_seed(seed)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = require_device(allow_cpu)
 
     aug = Compose([PairedHFlip(0.5), RGBPhotometric(0.2, 0.2)])
     # Official protocol split: sets 00-05, every 2nd frame, sanitized annotations.
@@ -136,9 +160,11 @@ def main():
                     help="restrict to frames containing >=1 pedestrian (for the smoke)")
     ap.add_argument("--split", default="train",
                     choices=["train", "test", "test-day", "test-night"])
+    ap.add_argument("--allow-cpu", action="store_true",
+                    help="permit CPU training (very slow); default is to fail loudly")
     a = ap.parse_args()
     train(a.root, a.modality, a.lr, a.epochs, a.batch_size, a.seed, a.limit, a.out,
-          a.positives_only, a.split)
+          a.positives_only, a.split, a.allow_cpu)
 
 
 if __name__ == "__main__":
