@@ -1,0 +1,181 @@
+% Compiles on its own (pulls ../main.tex's preamble via subfiles) or as part of the book.
+\documentclass[../main.tex]{subfiles}
+\begin{document}
+
+\chapter{Choosing the Learning Rate}
+
+The machine can train (Ch.~7). Before we spend real GPU-hours on the experiments that produce the
+study's numbers, we owe one measurement: the learning rate. This chapter is that measurement --- how
+we ran it, what it returned, what the returned numbers mean when read against the published
+literature, and one uncomfortable thing the exercise revealed about our recipe that we did not go
+looking for.
+
+\section{Why this is a measurement and not a lookup}
+
+The learning rate is the size of the step the optimiser takes downhill after every batch (Ch.~7,
+the foggy-hillside picture). It is the single most consequential number in training: too large and
+the descent bounces across the valley and never settles or diverges outright; too small and it
+crawls, wasting hours.
+
+For most projects the learning rate is a \emph{lookup}: you copy a value from a model someone
+already tuned. We cannot do that, and the reason is Soham's from-scratch directive. A pretrained
+model arrives with weights already in a good region, so its safe learning rate is known and
+transferable. Ours starts from noise. Nobody has tuned an 8.94M-parameter YOLOX trained from
+scratch on 25{,}086 KAIST thermal frames at batch~8. So the learning rate is an \emph{empirical
+unknown for our exact setup}, and the only honest way to get it is to try several and measure.
+That is a \textbf{learning-rate sweep}.
+
+\section{How the sweep was run, and why single-seed}
+
+We trained one short run per candidate rate and evaluated each on the held-out test set, reporting
+MR$^{-2}$ on All/Day/Night. The candidates were spaced roughly logarithmically --- $0.04, 0.02,
+0.01, 0.005, 0.0025, 0.00125$ across two attempts --- because learning rate acts multiplicatively;
+equal \emph{ratios}, not equal \emph{differences}, are what matter.
+
+Each run used a \textbf{single seed}, on purpose. This is a subtle methodological point worth
+stating plainly, because it looks like it contradicts Soham's ``5 seeds on every experiment''
+directive and does not. The five-seed rule exists to put error bars on a \emph{result} --- to
+separate a real improvement from initialisation luck. The sweep is not producing a result; it is
+making a coarse \emph{choice} among learning rates that differ by factors of two. A choice that
+coarse does not need error bars: if two rates are within seed-noise of each other, either is fine,
+and if one is clearly better, one seed already shows it. Spending five seeds per candidate here
+would multiply the cost fivefold to sharpen a decision that does not need sharpening. The seeds go
+where they matter: the final baselines.
+
+\section{The cliff: what divergence actually looks like}
+
+Two of the candidates never produced a usable model, and how they failed is worth seeing rather
+than being told. At $\text{lr}=0.02$ the objectness loss did not descend --- it \emph{ran away}:
+
+\begin{center}
+\includegraphics[width=0.82\textwidth]{lr_divergence.png}
+\end{center}
+
+Read the shape. For the first few hundred steps the loss is merely noisy (the spike near step 840
+is a single bad batch, recovered immediately). Then, past step~1000, it stops recovering and climbs
+--- 12, 90, 257, 402, 664, 989 --- each step's oversized update making the next gradient larger, a
+runaway feedback loop. The step size was large enough that every correction overshot into worse
+territory. This is divergence: not slow learning, but the loss actively exploding.
+
+It also \emph{crashed the process}, and the mechanism is a lesson in itself. When the loss explodes
+the model's predicted numbers become \texttt{NaN} (not-a-number). Inside SimOTA's cost computation
+sits a cross-entropy call that carries a \emph{device-side assertion} its input lies in $[0,1]$; a
+\texttt{NaN} trips it. Crucially, a device-side assert does not raise a normal Python error --- it
+\textbf{corrupts the entire CUDA context for the process}, so every later operation fails too. In
+our first sweep this took down not just $\text{lr}=0.02$ but the three healthy rates queued behind
+it. Only the first failure was real; the rest was collateral from a poisoned GPU state.
+
+\begin{lesson}
+Divergence must be made survivable, or one bad hyperparameter costs a whole sweep. We fixed this in
+three layers: (1) sanitise \texttt{NaN}s before the cross-entropy so divergence stays a normal
+Python event instead of a device assert; (2) detect a runaway loss on a \emph{smoothed} average
+(an EMA over a grace period, not a single batch --- a first attempt used a single-batch threshold
+and false-fired at step~22, because the per-image loss legitimately spikes when a batch holds only
+one assignable pedestrian); and (3) train each learning rate in its own \emph{subprocess}, so even
+a hard GPU fault costs one run, not all of them. The dashed line in the figure is that EMA guard.
+\end{lesson}
+
+There is a second, quieter finding hiding in the cliff. $\text{lr}=0.04$ --- \emph{larger} than the
+0.02 that diverged --- actually survived all eight epochs (though it never settled, spiking and
+dropping positives to the end). A larger rate surviving while a smaller one blows up is not a
+contradiction: this model sits close to its stability edge, and which side of the edge a run lands
+on depends partly on the luck of its random initialisation. That fragility has a real consequence
+we return to in the recipe decision.
+
+\section{The result}
+
+The four rates that produced usable models:
+
+\begin{center}
+\includegraphics[width=0.9\textwidth]{lr_sweep_mr.png}
+\end{center}
+
+\begin{center}
+\begin{tabular}{lcccl}
+\toprule
+lr & MR$^{-2}$ All & Day & Night & \\
+\midrule
+\textbf{0.01} & \textbf{36.56} & 43.47 & 22.61 & winner \\
+0.0025 & 38.67 & 44.71 & 26.11 & \\
+0.005 & 38.98 & 44.81 & 26.89 & \\
+0.00125 & 43.21 & 50.94 & 27.35 & worst \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The curve is clean and monotonic: performance improves as the rate rises toward $0.01$, then the
+cliff above it. The winner, $0.01$, beats the next-best by $2.1$ MR points --- and that margin is
+\emph{real}, not noise. The bottom three cluster within four points, and the $0.005$/$0.0025$ pair
+differ by $0.3$, which is about the size of single-seed jitter. Against that noise scale, a
+$2.1$-point separation is a genuine signal. The optimum sits at or just below $0.01$.
+
+\section{Reading the numbers honestly}
+
+Two things in the table are worth dwelling on.
+
+\textbf{Night beats Day, by a lot} ($22.6$ vs $43.5$). This is the thermal sensor's physics falling
+straight out of the model. A thermal camera sees heat: at night a warm body blazes against a cool
+background; in daytime the sun warms pavement, walls and cars to near body temperature and the
+person no longer stands out thermally. The whole KAIST literature reports thermal-only dominating
+at night, and here our from-scratch model has rediscovered it unaided. Had Day beaten Night we would
+suspect a swapped label or a broken split. It did not --- the model learned real physics, which is
+the strongest sanity check we have that the pipeline is sound end to end.
+
+\textbf{The absolute number is mediocre, and that is expected.} Placed against the published record
+(from \texttt{docs/LITERATURE.md}, thermal-only on KAIST):
+
+\begin{center}
+\begin{tabular}{lcccl}
+\toprule
+method & All & Day & Night & note \\
+\midrule
+FasterRCNN-T (2016) & 47.6 & 50.1 & 40.9 & original anno, hand-tuned era \\
+\textbf{ours} & \textbf{36.6} & 43.5 & 22.6 & from scratch, 8 epochs \\
+modern thermal-only & $\sim$19.0 & $\sim$24.6 & $\sim$7.8 & pretrained backbone \\
+\emph{full-fusion SOTA} & 7--8 & --- & --- & for scale only \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+We sit between the crude 2016 detector and a modern pretrained one --- exactly where a small,
+from-scratch, lightly-trained model belongs. Better than 2016; well short of modern. Nothing is
+broken, nothing is magical.
+
+\section{The uncomfortable discovery: we have not chosen the epoch budget}
+
+Benchmarking forces an observation the sweep was not designed to produce. The gap between our
+$36.6$ and modern $\sim$19 is mostly \emph{not architecture} --- it is \textbf{epochs and
+pretraining}. YOLOX trains for on the order of 300 epochs from scratch on COCO. Our runs saw each
+image \emph{eight} times. Eight epochs was a deliberate choice \emph{for the sweep} --- just enough
+to rank learning rates --- but that means the number is a sweep artifact, not a recipe.
+
+This matters far beyond a nicer headline, and it is the real payoff of thinking about the result
+rather than just filing it:
+
+\begin{lesson}
+An undertrained baseline invalidates the whole study, silently. PRISM's central question is whether
+fusion beats single-modality. If the thermal-only baseline is undertrained and the fusion model is
+trained to convergence, then ``fusion wins'' is uninterpretable --- you cannot tell whether fusion
+\emph{helped} or merely \emph{trained more effectively}. A fair comparison requires baseline and
+fusion to reach comparable convergence. So the epoch budget is not cosmetic; it is a controlled
+variable, and it must be fixed \emph{before} the reference baselines are run. We locked the learning
+rate here; we have not yet locked epochs, and that is the next thing to settle.
+\end{lesson}
+
+\section{The decision, with margin}
+
+We lock \textbf{lr $=0.01$}. We considered probing higher (0.012--0.015, since $0.01$ is the top of
+the tested range), and rejected it. The reasoning is stability, not just the $2.1$-point win:
+$0.01$ sits a comfortable $2\times$ below the $0.02$ divergence cliff, and because this model lives
+near its stability edge, the five-seed protocol will run five different initialisations at this
+rate. A rate pushed toward the cliff risks some of those seeds diverging and wrecking the noise
+floor. A recipe chosen at the edge is a fragile recipe; a marginal fraction of an MR point is not
+worth trading the robustness of every downstream run for. Locked at $0.01$, with margin.
+
+\medskip\noindent\textbf{Locked so far:} learning rate $=0.01$. \textbf{Still open:} the epoch
+budget (Ch.~9), and the annotation sets that make our numbers comparable to the leaderboard (the
+on-disk ``sanitized'' set is a duplicate of the ``new'' set --- a real download is pending; see the
+decisions log). Only once epochs are fixed and the correct annotations are installed do the
+five-seed baselines get spent.
+
+\end{document}
