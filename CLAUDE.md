@@ -13,42 +13,42 @@ grid, honest metrics — rather than reasoning about fusion from an armchair.
 
 Target: **report + reproducible repo in 4–6 weeks** (started 2026-07-13).
 
-## Status (2026-07-24)
+## Status (2026-07-30)
 
-Phase 0 + Phase 1 done. **The detector trains from scratch and the metric pipeline is wired
-end-to-end.** blocks → CSPDarknet → PAFPN → decoupled head → YOLOX (**8.94M params**) → decoder →
-loss + SimOTA → training loop → protocol splits → MR⁻² evaluation. **32 tests green**
-(`make test`). Full 36GB KAIST verified + extracted at `data/raw/kaist-cvpr15`.
+**Phase 1 nearly complete — fusion works.** Full pipeline end-to-end: CSPDarknet → PAFPN →
+decoupled head → YOLOX (8.94M) → loss + SimOTA → training loop → protocol splits → MR⁻² (full
+scale/occlusion suite). Two-stream fusion (`TwoStreamYOLOX`, 13.84M) built and validated.
+**39 tests green.**
 
-Verified smoke (thermal, 300 pedestrian frames, 20 epochs): loss 42.2→1.10, obj 37.4→0.16,
-iou 0.70→0.12, no NaN; the trained model puts boxes on the pedestrians
-(`docs/figures/trained_before_after.png`). That is *memorization*, not detection — the gate only
-proves the loop learns.
+**Recipe locked:** lr = 0.01 (sweep), 16 epochs (calibration showed from-scratch plateaus fast;
+~35% is the data-limited ceiling, modern methods reach ~19% via pretraining). Real annotations
+installed (see below). Results in `docs/RESULTS.md`; the textbook (`docs/textbook/`, 11 chapters)
+narrates the whole build.
 
-**Two from-scratch bugs found and fixed here (both regression-tested):**
-1. **Missing prior-probability bias init.** Head obj/cls biases started at 0 → σ(0)=0.5 → every
-   cell screamed "object" → all-background objectness loss ≈ **18,000** → SGD diverged to NaN.
-   Fix: init to −log((1−π)/π), π=0.01 (≈−4.595). The overfit-one-image test missed it because it
-   used **AdamW** (self-normalizes gradient scale); **SGD** on background batches exposed it.
-   *Lesson: a green suite proves the cases you tested, not correctness.*
-2. **AMP-unsafe BCE.** SimOTA's internal `F.binary_cross_entropy` on sigmoided probabilities is
-   forbidden under autocast; the cost matrix now runs in fp32 with autocast disabled.
+**Headline results (improved-test, from scratch, 5 seeds unless noted):**
+- thermal-only: All 36.1±1.3 / Day 43.9 / Night 20.6±1.2
+- RGB-only:     All 52.5±1.5 / Day 46.3 / Night 65.9±0.9 (near-blind at night)
+- **F-cat-345 fusion (seed 0):** All **27.3** / Day **31.6** / Night **18.7** — beats thermal by
+  8.8/12.3/1.9, past the ~2.5 noise bar; beats BOTH cameras in Day → real cross-modal benefit,
+  not the APEX single-modality trap. 5-seed noise floor pending.
 
-**Next: LR sweep (`scripts/sweep_lr.py`) → lock the recipe → from-scratch RGB-only and
-thermal-only baselines × 5 seeds → MR⁻² with the noise floor.** Then Phase 2 (two-stream fusion).
+**From-scratch bugs found + regression-tested:** (1) missing prior-bias init → all-background
+objectness ≈18,000 → SGD NaN (fix: bias = −log((1−π)/π), π=0.01); the AdamW overfit test missed
+it, SGD exposed it. (2) SimOTA's BCE is AMP-unsafe → run the cost in fp32, autocast off.
+(3) divergence guard on a smoothed EMA (a single-batch limit false-fired at step 22).
 
-### ⚠ Annotation comparability (verified 2026-07-24 — read before quoting any number)
+**Next:** F-cat-345 seeds 1–4 (fusion noise floor) → width-matched control → evaluator
+verification → **Phase 2: fusion-depth sweep** (dark3/4/5/all, `fuse_stages` already supports it).
 
-`annotations-xml-new-sanitized` on this disk is a **byte-identical copy** of
-`annotations-xml-new` (95,324 XMLs each, zero differing files). We hold **one** annotation set
-under two names, so the train=sanitized / test=improved mapping in `kaist_split()` is a **no-op**.
+### Annotations (resolved 2026-07-29 — now leaderboard-comparable)
 
-- **Internal comparisons stay valid** — every experiment shares the same annotations, so fusion
-  A-vs-B, the misalignment sweep, and the 5-seed noise floor are unaffected. Proceed.
-- **Cross-paper comparison is NOT valid yet**, and neither is the open evaluator verification
-  (which works by reproducing a published number). Needs the real **sanitized-train** (Li et
-  al./MSDS-RCNN) and **improved-test** (Liu et al. 2018) annotation sets — download links in the
-  decisions log (2026-07-24). Installing them is a one-line change in `_SPLITS`.
+The real sets are installed and wired: **`annotations-sanitized-train`** (Li et al./MSDS-RCNN,
+7,601 frames — the field's standard training set, listed in `imageSets/train-sanitized.txt`) and
+**`annotations-improved-test`** (Liu et al. 2016, covering all 2,252 test frames). Converted from
+bbGt text to XML by `scripts/convert_kaist_bbgt.py`; `_SPLITS` points at them. (The old
+`annotations-xml-new{,-sanitized}` dirs were a byte-identical duplicate — left in place,
+unreferenced.) Numbers are now internally valid AND comparable to the published leaderboard, though
+absolute levels stay in the from-scratch regime.
 
 **Locked training directives (Soham, see decisions log):** train **from scratch** (small model +
 small data); **5 seeds on every experiment** (mean±std, 2σ bar); small **LR + LR-decay sweep**

@@ -1,0 +1,114 @@
+% Compiles on its own (pulls ../main.tex's preamble via subfiles) or as part of the book.
+\documentclass[../main.tex]{subfiles}
+\begin{document}
+
+\chapter{The First Fusion Model}
+
+Every chapter so far served a single-camera detector. This one builds the model the whole project
+exists to study: a detector that sees \emph{both} cameras at once. It also produces the result that
+justifies the study --- fusion beats either camera alone --- and, just as important, shows how we
+proved that beating was real rather than an artifact.
+
+\section{From one stream to two}
+
+The single-stream detector was \texttt{image $\to$ backbone $\to$ neck $\to$ head $\to$ boxes}. The
+two-stream model duplicates the backbone, one per camera, and merges them before the neck:
+
+\begin{center}
+\texttt{RGB $\to$ backbone$_\text{rgb}$ \quad$\searrow$}\\
+\texttt{\hspace{4.2cm} fuse $\to$ neck $\to$ head $\to$ boxes}\\
+\texttt{thermal $\to$ backbone$_\text{thm}$ \quad$\nearrow$}
+\end{center}
+
+Two backbones, not one shared backbone, because the cameras are physically different: a filter
+tuned to colour texture is wrong for heat, so each stream must learn its own low-level detectors
+(the ``middle fusion'' argument, Ch.~on the reading). The cost is $\sim2\times$ the backbone
+parameters --- $13.84$M total, $1.55\times$ the single stream (not a full $2\times$, because the
+neck and head are shared). That $1.55\times$ is a number to remember: it is exactly the size a
+\emph{width-matched control} must reach, so that a later fusion win cannot be dismissed as ``you
+just used more parameters.''
+
+\section{The one thing that changes, and everything that must not}
+
+The scientific value of the whole study rests on a discipline: \textbf{change only the fusion.}
+Everything after the merge --- the PAFPN neck, the decoupled head, the loss, SimOTA, the recipe
+(lr $=0.01$, 16 epochs) --- is byte-for-byte the single-stream code, already built and tested. The
+neck receives three feature maps of the same shapes it always did; it cannot tell they are now
+\emph{fused} maps rather than single-camera maps. If we had also tweaked the neck or the recipe, a
+result difference could not be attributed to fusion. Holding everything else fixed is what lets the
+comparison mean something.
+
+\section{The operator and the config}
+
+\textbf{The operator} --- how two feature maps become one --- is the study's central variable, and
+the first one is the field's workhorse, \emph{concat + 1$\times$1}: stack the two maps channel-wise
+($2C$ channels) and let a learned $1\times1$ convolution mix them back to $C$. The $1\times1$ learns,
+per channel, how much of each camera to keep. Its zero-parameter cousin (element-wise sum) also
+lives in the code as the honest floor operator and as the fallback for stages a single-stage config
+leaves un-fused.
+
+\textbf{The config} is called \textbf{F-cat-345}: fuse with concat+$1\times1$ at all three backbone
+depths (\texttt{dark3}, \texttt{dark4}, \texttt{dark5}). It is the sensible default --- fuse
+everywhere, learn the blend --- and it becomes the \emph{anchor} the rest of the study varies from:
+Phase~2 will ask ``what if we fuse at only one depth?'' and Phase~3 ``what if the operator is not
+concat?'' Both are one-line changes to this model.
+
+\section{Proving the path learns before trusting a number}
+
+Before any real training, the same cheap check as always: can the two-stream model overfit a single
+image? It can (the loss more than halves in 150 steps), which proves the whole new path ---
+two backbones, the fusion modules, the shared neck/head, gradients flowing back through all of it ---
+is wired correctly. Only then is a real run worth its GPU-hours.
+
+\section{The result}
+
+One seed, the locked recipe, evaluated on improved-test:
+
+\begin{center}
+\begin{tabular}{lcccc}
+\toprule
+Model & Params & All & Day & Night \\
+\midrule
+thermal-only & 8.94M & $36.1\pm1.3$ & $43.9$ & $20.6$ \\
+RGB-only     & 8.94M & $52.5\pm1.5$ & $46.3$ & $65.9$ \\
+\textbf{F-cat-345} & 13.84M & $\mathbf{27.3}$ & $\mathbf{31.6}$ & $\mathbf{18.7}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Fusion beats the better single camera \emph{everywhere}, and by margins far past the $\sim2.5$-point
+noise bar: All $-8.8$, Day $\mathbf{-12.3}$, Night $-1.9$. The shape of the win is exactly what the
+physics predicts. Daytime is where both cameras carry information, so fusing them helps most
+($-12.3$). Night is where RGB is nearly blind, so there is little to add ($-1.9$) --- but crucially
+fusion did \emph{not} let the useless night-time RGB stream drag thermal down; it preserved thermal's
+advantage. (The five-seed noise floor for this model is pending; the single seed already clears the
+bar with room to spare.)
+
+\section{The disproof of the APEX trap}
+
+The failure this project was built to avoid is a ``fusion'' model that silently ignores one camera
+and rides the other --- the \texttt{apex} outcome, where a clean average hid a modality collapse.
+The Day column is the disproof. Fusion in daytime ($31.6$) beats \emph{both} thermal ($43.9$) and RGB
+($46.3$), and neither camera alone comes anywhere near $31.6$. A model riding a single stream could
+at best match that stream; beating both is only possible by genuinely combining their evidence.
+
+\begin{lesson}
+A number is not a result until you have tried to break it. Here we corroborated the metric with the
+eye: predictions drawn on real day and night frames
+(\texttt{docs/figures/fusion\_vs\_baselines\_grid.png}). In daytime, fusion boxes pedestrians that
+\emph{both} single cameras miss. At night, the RGB image is visibly near-black and rgb-only detects
+nothing, while thermal and fusion both light up the pedestrians. The picture tells the same story as
+the table --- and one honest bug surfaced along the way: an early version of the figure rendered
+every panel in grayscale, which briefly looked as if the RGB camera were thermal. A direct pixel
+check (RGB channels differ by 11--21 intensity levels; thermal channels are identical) proved the
+data was correct and the plot was wrong. Verify the tool before you doubt the result.
+\end{lesson}
+
+\section{What remains before Phase 2}
+
+Two loose ends close Phase~1: the five-seed noise floor for F-cat-345 (so this win carries error
+bars), and the width-matched control (so it cannot be attributed to parameter count). Then the
+anchor is set, and Phase~2 begins varying the one thing we have so far held fixed --- \emph{where}
+in the backbone the two cameras meet.
+
+\end{document}
