@@ -109,7 +109,7 @@ def require_device(allow_cpu=False):
 
 def train(root, modality="rgb", lr=0.01, epochs=10, batch_size=8,
           seed=0, limit=None, out="checkpoints", positives_only=False,
-          split="train", allow_cpu=False):
+          split="train", allow_cpu=False, save_every=0):
     set_seed(seed)
     device = require_device(allow_cpu)
     # Create the checkpoint dir UP FRONT: a bad path must fail in a second, not after
@@ -173,9 +173,19 @@ def train(root, modality="rgb", lr=0.01, epochs=10, batch_size=8,
                       f"iou{parts['iou']:.3f} obj{parts['obj']:.3f} "
                       f"cls{parts['cls']:.3f} fg{parts['num_fg']}")
 
-    Path(out).mkdir(parents=True, exist_ok=True)   # parents: sweep uses nested dirs
+        # Optional per-epoch checkpoints, for the epoch-vs-MR calibration curve. NOTE
+        # these are mid-schedule: the cosine LR is still high, so an epoch-k snapshot of
+        # a long run is a LOWER BOUND on a properly-annealed k-epoch run. Read the trend,
+        # not the absolute value; the fully-annealed final checkpoint is the real recipe.
+        if save_every and (epoch + 1) % save_every == 0 and (epoch + 1) != epochs:
+            ck = Path(out) / f"{modality}_seed{seed}_e{epoch + 1}.pt"
+            torch.save({"model": model.state_dict(), "modality": modality,
+                        "seed": seed, "epoch": epoch + 1}, ck)
+            print(f"saved {ck}")
+
     ckpt = Path(out) / f"{modality}_seed{seed}.pt"
-    torch.save({"model": model.state_dict(), "modality": modality, "seed": seed}, ckpt)
+    torch.save({"model": model.state_dict(), "modality": modality,
+                "seed": seed, "epoch": epochs}, ckpt)
     print(f"saved {ckpt}")
     return model
 
@@ -196,9 +206,11 @@ def main():
                     choices=["train", "test", "test-day", "test-night"])
     ap.add_argument("--allow-cpu", action="store_true",
                     help="permit CPU training (very slow); default is to fail loudly")
+    ap.add_argument("--save-every", type=int, default=0,
+                    help="also save a checkpoint every N epochs (for epoch calibration)")
     a = ap.parse_args()
     train(a.root, a.modality, a.lr, a.epochs, a.batch_size, a.seed, a.limit, a.out,
-          a.positives_only, a.split, a.allow_cpu)
+          a.positives_only, a.split, a.allow_cpu, a.save_every)
 
 
 if __name__ == "__main__":
