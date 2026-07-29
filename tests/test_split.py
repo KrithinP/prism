@@ -7,7 +7,7 @@ ROOT = "data/raw/kaist-cvpr15"
 
 
 @pytest.mark.parametrize("split,expected", [
-    ("train", 25086), ("test", 2252), ("test-day", 1455), ("test-night", 797)])
+    ("train", 7601), ("test", 2252), ("test-day", 1455), ("test-night", 797)])
 def test_split_counts_match_protocol(split, expected):
     ds = kaist_split(ROOT, split)
     assert len(ds) == expected, f"{split}: got {len(ds)}, expected {expected}"

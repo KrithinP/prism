@@ -97,23 +97,18 @@ class PairedKAIST(Dataset):
 
 # Official KAIST protocol splits: (list file, annotation source).
 #
-# WARNING (verified 2026-07-22): on this disk `annotations-xml-new-sanitized` is a
-# byte-identical COPY of `annotations-xml-new` -- all 95,324 XMLs match, the only
-# difference being a stray .lnk file. So the train=sanitized / test=improved mapping
-# below is currently a NO-OP: we hold ONE annotation set under two names.
-#
-# Consequence: internal comparisons (fusion op A vs B, misalignment sweep) stay valid,
-# because every experiment shares the same annotations. What is NOT yet valid is
-# comparing our MR^-2 to published numbers -- that needs the real
-#   * sanitized TRAIN annotations (Li et al. / MSDS-RCNN), and
-#   * improved TEST annotations  (Liu et al. 2018).
-# Both are separate downloads. The structure below is kept so that dropping the real
-# annotation dirs in place is a one-line change. See decisions log.
+# These point at the REAL annotation sets, converted from bbGt to XML on 2026-07-29
+# (scripts/convert_kaist_bbgt.py). Note the training list: the field's standard
+# training set is the 7601 sanitized frames (Li et al./MSDS-RCNN), NOT every-2nd-frame
+# -- `train-sanitized.txt` is that list. Test evaluates on the improved annotations
+# (Liu et al. 2016), which cover exactly the 2252 frames of test-all-20.
+# (The old annotations-xml-new{,-sanitized} dirs were a byte-identical duplicate; they
+# are left in place but no longer referenced. See decisions log 2026-07-24 / 07-29.)
 _SPLITS = {
-    "train":      ("train-all-02.txt", "annotations-xml-new-sanitized"),
-    "test":       ("test-all-20.txt",  "annotations-xml-new"),
-    "test-day":   ("test-day-20.txt",  "annotations-xml-new"),
-    "test-night": ("test-night-20.txt", "annotations-xml-new"),
+    "train":      ("train-sanitized.txt", "annotations-sanitized-train"),
+    "test":       ("test-all-20.txt",     "annotations-improved-test"),
+    "test-day":   ("test-day-20.txt",     "annotations-improved-test"),
+    "test-night": ("test-night-20.txt",   "annotations-improved-test"),
 }
 
 
