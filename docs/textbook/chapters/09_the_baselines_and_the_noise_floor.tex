@@ -1,0 +1,111 @@
+% Compiles on its own (pulls ../main.tex's preamble via subfiles) or as part of the book.
+\documentclass[../main.tex]{subfiles}
+\begin{document}
+
+\chapter{The Baselines and the Noise Floor}
+
+Before a single fusion model exists, we need two things: the scores fusion must beat, and a
+measure of how much a score can be trusted. This chapter produces both, and then does something
+the rest of the field mostly skips --- it \emph{audits} the numbers before believing them.
+
+\section{Why baselines come first}
+
+The entire question of this project is: \emph{does combining two cameras beat using one?} That
+question is meaningless without ``one'' as a reference. So the first experiments are deliberately
+un-clever: train a detector on \textbf{thermal only}, train one on \textbf{RGB only}, and measure
+them exactly the way every later model will be measured. These are the \textbf{baselines}. A fusion
+model that cannot beat the better of them is not fusion --- it is a more expensive single camera,
+and (as \texttt{apex} showed) that failure can hide behind a healthy-looking average.
+
+\section{The noise floor, and why five seeds}
+
+A single training run gives a single number, and that number is partly luck. The model starts from
+random weights (from scratch --- Soham's directive), and different random starts land in slightly
+different places. So we train each baseline \textbf{five times}, changing only the random seed, and
+report the mean and the standard deviation.
+
+That standard deviation is the \textbf{noise floor}: the amount a score wobbles for reasons that
+have nothing to do with the model. It is the most important number for everything that follows,
+because it sets the bar a real result must clear. The convention: a later model only counts as
+genuinely better if it beats a baseline by more than \emph{twice} the noise floor
+($|\Delta| > 2\sigma$). Anything smaller is indistinguishable from a lucky seed.
+
+\begin{lesson}
+Most published KAIST papers report single-run improvements of $0.3$--$1.0$ MR points with no error
+bars at all. Our own noise floor (below) is $\approx 1$--$2$ points. That means many published
+``improvements'' are inside the noise --- unfalsifiable. Running five seeds and quoting $\sigma$
+makes this study more honest than much of the literature it cites. The discipline is cheap; the
+credibility it buys is not.
+\end{lesson}
+
+\section{The results}
+
+Five seeds each, from scratch, at the locked recipe (lr $=0.01$, 16 epochs), evaluated on the
+improved-test annotations:
+
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+ & All & Day & Night \\
+\midrule
+\textbf{thermal-only} & $36.1\pm1.3$ & $43.9\pm1.4$ & $\mathbf{20.6\pm1.2}$ \\
+\textbf{RGB-only}     & $52.5\pm1.5$ & $46.3\pm1.8$ & $\mathbf{65.9\pm0.9}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{center}
+\includegraphics[width=0.78\textwidth]{baselines_thermal_vs_rgb.png}
+\end{center}
+
+The headline is \textbf{Night}: RGB misses $\approx 66\%$ of pedestrians, thermal $\approx 21\%$ ---
+a $45$-point chasm. At night the RGB image is nearly black; thermal sees body heat glowing against
+the cool dark. This is the multispectral premise made concrete, and it is the gap fusion exists to
+exploit. Thermal is in fact the stronger camera \emph{everywhere} here (even in daytime), so RGB
+has no clear home turf --- which makes fusion's job specific: add RGB's daytime detail on top of
+thermal's dominance \emph{without} surrendering thermal's night advantage.
+
+\section{Auditing the numbers before trusting them}
+
+A clean-looking result is exactly when to be suspicious. Five checks, each able to expose a
+different bug:
+
+\begin{enumerate}
+  \item \textbf{Internal consistency.} The ``All'' score should approximate the day/night scores
+        blended by their frame counts ($1455$ day, $797$ night). Thermal: blend $35.6$ vs actual
+        $36.1$; RGB: blend $53.2$ vs actual $52.5$. Both agree within a point. \emph{This is the
+        check that catches a broken evaluator, a wrong frame count, or a swapped day/night label ---
+        and it passes.}
+  \item \textbf{Cameras not swapped.} The worst silent bug would feed the ``thermal'' model RGB
+        images. But thermal is better at night and RGB is better in day --- both physically correct.
+        A swap would make ``thermal'' blind at night. Ruled out.
+  \item \textbf{Night ordering vs physics.} The $45$-point night gap is the textbook multispectral
+        result; a broken pipeline gives $\sim100\%$ (detects nothing) or noise, not a clean
+        physics-consistent split.
+  \item \textbf{RGB night vs the published floor.} The literature's RGB-only night is $\approx 64\%$;
+        ours is $65.9\%$. At night RGB hits a floor --- you cannot detect what the camera cannot see
+        --- so it lands there almost regardless of architecture. Independent agreement.
+  \item \textbf{Absolute levels.} Thermal ($36$) sits between 2016 Faster-RCNN-thermal ($\sim47$)
+        and modern pretrained thermal ($\sim19$); RGB ($52$) is weaker than pretrained
+        Faster-RCNN-RGB, as from-scratch should be. Believable, not suspicious.
+\end{enumerate}
+
+\begin{lesson}
+One result deviates from the textbook pattern: in the literature RGB usually beats thermal in
+\emph{daytime}, but here thermal marginally wins day too ($43.9$ vs $46.3$). This is not a bug --- it
+is a from-scratch artifact. Thermal images are simpler (grayscale-like heat blobs) and therefore
+easier to learn from a random start, while RGB (rich colour and texture) underperforms its usual
+potential without a pretrained backbone. Pretrained models do not show this because ImageNet already
+taught the RGB backbone to see. The margin is $\approx 2\sigma$ --- marginal, well-explained, worth
+a footnote in the report, not worth worrying about. The habit to keep: when a number defies
+expectation, find the mechanism before you either trust it or ``fix'' it.
+\end{lesson}
+
+\section{What this licenses}
+
+With trustworthy baselines and a quantified noise floor, the study has its yardstick. Every fusion
+model from here reports MR$^{-2}$ All/Day/Night against \emph{these} numbers, and a claim of
+improvement is only entered in the ledger if it clears $2\sigma$. The next chapter builds the first
+model that sees both cameras at once.
+
+\end{document}
