@@ -40,9 +40,13 @@ def detect(model, *imgs):
     return postprocess(decode_outputs([o.float() for o in outs]), conf_thr=CONF)[0].cpu()
 
 
-def draw(ax, img_chw, gt, preds, title):
-    disp = (img_chw[0].numpy() * 255).astype("uint8")   # 1 channel, grayscale
-    ax.imshow(disp, cmap="gray"); ax.set_title(title, fontsize=9); ax.axis("off")
+def draw(ax, img_chw, gt, preds, title, color=False):
+    if color:                                            # RGB: show true colour (CHW->HWC)
+        disp = img_chw.permute(1, 2, 0).clamp(0, 1).numpy()
+        ax.imshow(disp)
+    else:                                                # thermal: single-channel grayscale
+        ax.imshow((img_chw[0] * 255).numpy().astype("uint8"), cmap="gray")
+    ax.set_title(title, fontsize=9); ax.axis("off")
     for b in gt:
         x1, y1, x2, y2 = b
         ax.add_patch(patches.Rectangle((x1, y1), x2 - x1, y2 - y1,
@@ -88,7 +92,7 @@ def main():
         df = detect(fusion, rgb_img, thm_img)
 
         draw(axes[row, 0], thm_img, gt, dt, f"{tag}  thermal-only ({len(dt)})")
-        draw(axes[row, 1], rgb_img, gt, dr, f"{tag}  rgb-only ({len(dr)})")
+        draw(axes[row, 1], rgb_img, gt, dr, f"{tag}  rgb-only ({len(dr)})", color=True)
         draw(axes[row, 2], thm_img, gt, df, f"{tag}  FUSION ({len(df)})")
 
     fig.suptitle("Red = ground truth   |   Lime = prediction (+score)   |   "
