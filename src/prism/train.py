@@ -18,9 +18,12 @@ import torch
 from torch.utils.data import DataLoader
 
 from prism.data.kaist import PairedKAIST, kaist_split
-from prism.data.detection import DetectionDataset, detection_collate
+from prism.data.detection import (
+    DetectionDataset, detection_collate, FusionDataset, fusion_collate,
+)
 from prism.data.transforms import Compose, PairedHFlip, RGBPhotometric
 from prism.models.yolox import YOLOX
+from prism.models.yolox_fusion import TwoStreamYOLOX
 from prism.models.loss import YOLOXLoss
 
 
@@ -121,15 +124,22 @@ def train(root, modality="rgb", lr=0.01, epochs=10, batch_size=8,
     # Real runs use ALL train frames -- background-only frames are fine (and needed)
     # now that the prior-bias init keeps the from-scratch objectness loss sane.
     base = kaist_split(root, split)
-    ds = DetectionDataset(base, modality=modality, transforms=aug)
+    is_fusion = modality == "fusion"
+    if is_fusion:
+        ds = FusionDataset(base, transforms=aug)
+        collate = fusion_collate
+    else:
+        ds = DetectionDataset(base, modality=modality, transforms=aug)
+        collate = detection_collate
     idx = positive_indices(base) if positives_only else list(range(len(ds)))
     if limit:                                    # smoke mode: overfit a few hundred frames
         idx = idx[:limit]
     ds = torch.utils.data.Subset(ds, idx)
     loader = DataLoader(ds, batch_size=batch_size, shuffle=True, num_workers=4,
-                        collate_fn=detection_collate, drop_last=True)
+                        collate_fn=collate, drop_last=True)
 
-    model = YOLOX(num_classes=1).to(device).train()
+    model = (TwoStreamYOLOX(num_classes=1) if is_fusion
+             else YOLOX(num_classes=1)).to(device).train()
     lossfn = YOLOXLoss(num_classes=1)
     opt = build_optimizer(model, lr)
     scaler = torch.amp.GradScaler(device, enabled=(device == "cuda"))
@@ -139,14 +149,19 @@ def train(root, modality="rgb", lr=0.01, epochs=10, batch_size=8,
     step = 0
     loss_ema = None                                      # smoothed loss, for divergence
     for epoch in range(epochs):
-        for imgs, targets in loader:
-            imgs = imgs.to(device)
+        for batch in loader:
+            if is_fusion:
+                rgb, thermal, targets = batch
+                model_in = (rgb.to(device), thermal.to(device))
+            else:
+                imgs, targets = batch
+                model_in = (imgs.to(device),)
             for g in opt.param_groups:            # apply the schedule this step
                 g["lr"] = lr * lr_factor(step, total_steps, warmup_steps)
 
             opt.zero_grad()
             with torch.amp.autocast(device, enabled=(device == "cuda")):
-                loss, parts = lossfn(model(imgs), targets)
+                loss, parts = lossfn(model(*model_in), targets)
 
             # A diverged run is a RESULT ("this lr is unstable"), not a crash. Detect it
             # here and stop cleanly, before NaNs propagate into kernels that abort the
@@ -193,7 +208,7 @@ def train(root, modality="rgb", lr=0.01, epochs=10, batch_size=8,
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", required=True)
-    ap.add_argument("--modality", default="rgb", choices=["rgb", "thermal"])
+    ap.add_argument("--modality", default="rgb", choices=["rgb", "thermal", "fusion"])
     ap.add_argument("--lr", type=float, default=0.01)
     ap.add_argument("--epochs", type=int, default=10)
     ap.add_argument("--batch-size", type=int, default=8)

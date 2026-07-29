@@ -41,11 +41,17 @@ def collect_frames(model, base, modality, device, batch_size=8):
     """Run the model over every frame of `base`; return evaluator-shaped dicts."""
     frames = []
     model.eval()
+    is_fusion = modality == "fusion"
     for start in range(0, len(base), batch_size):
         samples = [base[i] for i in range(start, min(start + batch_size, len(base)))]
-        imgs = torch.stack([s[modality].float() / 255.0 for s in samples]).to(device)
         with torch.amp.autocast(device, enabled=(device == "cuda")):
-            outputs = model(imgs)
+            if is_fusion:
+                rgb = torch.stack([s["rgb"].float() / 255.0 for s in samples]).to(device)
+                thm = torch.stack([s["thermal"].float() / 255.0 for s in samples]).to(device)
+                outputs = model(rgb, thm)
+            else:
+                imgs = torch.stack([s[modality].float() / 255.0 for s in samples]).to(device)
+                outputs = model(imgs)
         dets = postprocess(decode_outputs([o.float() for o in outputs]),
                            conf_thr=EVAL_CONF_THR, iou_thr=EVAL_NMS_IOU)
         for s, d in zip(samples, dets):
@@ -66,7 +72,11 @@ def evaluate_checkpoint(ckpt_path, root, modality=None, splits=("test", "test-da
     ck = torch.load(ckpt_path, map_location="cpu")
     modality = modality or ck.get("modality", "rgb")
 
-    model = YOLOX(num_classes=1)
+    if modality == "fusion":
+        from prism.models.yolox_fusion import TwoStreamYOLOX
+        model = TwoStreamYOLOX(num_classes=1)
+    else:
+        model = YOLOX(num_classes=1)
     model.load_state_dict(ck["model"])
     model.to(device)
 
