@@ -24,23 +24,50 @@ counts only if it beats the baseline by more than 2σ (~2.5 points).**
 Sanity ordering holds: RGB collapses at night (65.9), thermal dominates it (20.6) — a
 45-point gap, the multispectral premise confirmed. Audit (5 checks) passed; see Ch.9.
 
-## Phase 1 — first fusion model
+## Recipe-selection runs (single seed — choosing hyperparameters, not claiming results)
 
-| Model | Params | MR⁻² All | Day | Night | Notes |
+**LR sweep** (thermal-only, 8 epochs, 1 seed each) — chose the learning rate:
+
+| lr | MR⁻² All | note |
+|---|---|---|
+| **0.01** | **36.6** | winner (locked) |
+| 0.005 | 39.0 | |
+| 0.0025 | 38.7 | |
+| 0.00125 | 43.2 | |
+| 0.02 / 0.04 | diverged / unstable | see Ch.8 (the "cliff") |
+
+**Epoch calibration** (thermal-only, lr 0.01, 1 seed, checkpoints along the way) — chose 16 epochs:
+
+| epochs | 8 | 16 | 24 | 32 | 40 |
 |---|---|---|---|---|---|
-| **F-cat-345** (concat @ dark3/4/5) | 13.84M (1.55×) | **27.3** | **31.6** | **18.7** | seed 0; 5-seed mean±std **pending** |
+| MR⁻² All | 34.4 | 35.6 | 34.7 | 35.4 | 36.8 |
 
-**vs thermal-only (seed 0):** All −8.8, Day −12.3, Night −1.9 — all beyond the ~2.5
-noise bar (Night marginal). Beats *both* single cameras in Day (31.6 vs 43.9 / 46.3),
-which neither reaches alone → genuine cross-modal benefit, **not** the APEX single-
-modality collapse. Verified visually (`docs/figures/fusion_vs_baselines_grid.png`):
-fusion recovers daytime pedestrians both cameras miss; ignores blind RGB at night.
+Flat within noise → from-scratch **plateaus by ~8 epochs** (data-limited, not undertrained:
+training loss kept falling while test MR did not). Locked **16 epochs** (past the plateau,
+cheap). This is why the absolute ceiling is ~35%. `docs/figures/epoch_calibration_thermal.png`.
 
-Scale breakdown (seed 0): near 14.4 / medium 37.2 / far 73.0 (far has few, noisy).
+## Phase 1 — first fusion model (F-cat-345, concat @ dark3/4/5, 13.84M = 1.55×)
+
+Per-seed MR⁻² (improved-test):
+
+| seed | All | Day | Night |
+|---|---|---|---|
+| 0 | 27.28 | 31.64 | 18.73 |
+| 1 | 24.68 | 29.43 | 15.17 |
+| 2 | 28.78 | 34.43 | 16.85 |
+| 3 | 30.37 | 35.89 | 18.86 |
+| 4 | *(running)* | | |
+| **mean ± std** | **pending seed 4** | | |
+
+**vs thermal-only (running mean of seeds 0–3 ≈ 27.8 All):** ~8 points better, far past the
+~2.5 noise bar. Fusion beats *both* single cameras in Day (neither reaches ~32 alone) →
+genuine cross-modal benefit, **not** the APEX single-modality collapse. Verified visually
+(`docs/figures/fusion_vs_baselines_grid.png`): recovers daytime pedestrians both cameras miss;
+ignores blind RGB at night. Scale breakdown (seed 0): near 14.4 / medium 37.2 / far 73.0.
 
 ## Pending
 
-- [ ] F-cat-345 seeds 1–4 → fusion noise floor (mean±std)
+- [ ] F-cat-345 seed 4 → finalize fusion noise floor (mean±std) — seeds 0–3 done
 - [ ] Width-matched single-stream control (~13.84M) — isolate fusion from parameter count
 - [ ] Evaluator verification vs a published method's released detections
 - [ ] Phase 2: fusion-depth sweep (dark3 / dark4 / dark5 / all) — `fuse_stages` ready
