@@ -11,7 +11,24 @@ at what compute cost, and how gracefully does it fail when the two streams stop 
 
 ## Status
 
-Phase 0 — setup and literature. Nothing trained yet.
+**Phase 1 complete; Phase 2 (fusion-depth sweep) running.** All models trained **from scratch**
+(no pretraining), lr 0.01, 16 epochs, **5 seeds** each, evaluated on the improved-test annotations.
+Absolute numbers sit in the from-scratch regime (~35% vs ~19% for pretrained methods); the study's
+claims are *internal deltas*, which are regime-independent. Full ledger in `docs/RESULTS.md`; the
+build is narrated chapter-by-chapter in `docs/textbook/`.
+
+| Model | MR⁻² All | Day | Night |
+|---|---|---|---|
+| thermal-only | 36.1 ± 1.3 | 43.9 | 20.6 |
+| RGB-only | 52.5 ± 1.5 | 46.3 | 65.9 |
+| **fusion (F-cat-345)** | **27.7 ± 1.9** | **32.7 ± 2.3** | **17.5 ± 1.4** |
+
+Fusion beats the better single camera by **−8.4 / −11.2 / −3.1** (All/Day/Night); All and Day clear
+2σ decisively, Night is borderline. Controls rule out the two usual false positives: it beats
+*both* single cameras in daytime (genuine cross-modal benefit, not a single-modality collapse), and
+a **parameter-matched** single-stream control (thermal widened to fusion's 14M params) stays at
+36.1 — so the win is from *combining cameras*, not model size. RGB's night-blindness (65.9 vs 20.6)
+confirms the multispectral premise.
 
 ## The dataset
 
