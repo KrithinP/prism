@@ -66,9 +66,21 @@ Fusion beats *both* single cameras in Day (neither reaches ~33 alone) → genuin
 benefit, **not** the APEX single-modality collapse. Verified visually
 (`docs/figures/fusion_vs_baselines_grid.png`). Scale breakdown (seed 0): near 14.4 / medium 37.2 / far 73.0.
 
+## Phase 1 — width-matched control (does param count explain the fusion win?)
+
+Thermal-only widened to **base_ch=42 (14.06M ≈ fusion's 13.84M)**, 5 seeds:
+
+| Model | Params | MR⁻² All | Day | Night |
+|---|---|---|---|---|
+| thermal-only | 8.94M | 36.1 ± 1.3 | 43.9 | 20.6 |
+| **width-matched thermal** | 14.06M | **36.06 ± 1.14** | 43.48 ± 1.18 | 21.15 ± 1.51 |
+| fusion (F-cat-345) | 13.84M | **27.69 ± 1.88** | 32.70 | 17.47 |
+
+**Verdict: the fusion win is NOT parameters.** Widening a single camera to fusion's budget
+moved MR by ~0 (36.1 → 36.1). Fusion, at the same budget, is **8.4 points better**. The win
+comes from *combining cameras*, not model size. **Phase 1 complete.**
+
 ## Pending
 
-- [ ] F-cat-345 seed 4 → finalize fusion noise floor (mean±std) — seeds 0–3 done
-- [ ] Width-matched single-stream control (~13.84M) — isolate fusion from parameter count
 - [ ] Evaluator verification vs a published method's released detections
-- [ ] Phase 2: fusion-depth sweep (dark3 / dark4 / dark5 / all) — `fuse_stages` ready
+- [~] Phase 2: fusion-depth sweep (dark3 / dark4 / dark5 vs 345 anchor) — **running (3 seeds)**
