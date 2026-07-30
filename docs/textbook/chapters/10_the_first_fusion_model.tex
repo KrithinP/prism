@@ -64,25 +64,35 @@ is wired correctly. Only then is a real run worth its GPU-hours.
 
 One seed, the locked recipe, evaluated on improved-test:
 
+All five seeds, mean $\pm$ standard deviation, on improved-test:
+
 \begin{center}
 \begin{tabular}{lcccc}
 \toprule
 Model & Params & All & Day & Night \\
 \midrule
-thermal-only & 8.94M & $36.1\pm1.3$ & $43.9$ & $20.6$ \\
-RGB-only     & 8.94M & $52.5\pm1.5$ & $46.3$ & $65.9$ \\
-\textbf{F-cat-345} & 13.84M & $\mathbf{27.3}$ & $\mathbf{31.6}$ & $\mathbf{18.7}$ \\
+thermal-only & 8.94M & $36.1\pm1.3$ & $43.9\pm1.4$ & $20.6\pm1.2$ \\
+RGB-only     & 8.94M & $52.5\pm1.5$ & $46.3\pm1.8$ & $65.9\pm0.9$ \\
+\textbf{F-cat-345} & 13.84M & $\mathbf{27.7\pm1.9}$ & $\mathbf{32.7\pm2.3}$ & $\mathbf{17.5\pm1.4}$ \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-Fusion beats the better single camera \emph{everywhere}, and by margins far past the $\sim2.5$-point
-noise bar: All $-8.8$, Day $\mathbf{-12.3}$, Night $-1.9$. The shape of the win is exactly what the
-physics predicts. Daytime is where both cameras carry information, so fusing them helps most
-($-12.3$). Night is where RGB is nearly blind, so there is little to add ($-1.9$) --- but crucially
-fusion did \emph{not} let the useless night-time RGB stream drag thermal down; it preserved thermal's
-advantage. (The five-seed noise floor for this model is pending; the single seed already clears the
-bar with room to spare.)
+Fusion beats the better single camera everywhere: All $-8.4$, Day $\mathbf{-11.2}$, Night $-3.1$.
+The shape of the win is exactly what the physics predicts. Daytime is where both cameras carry
+information, so fusing them helps most ($-11.2$, far past the combined $2\sigma\approx4.6$). Night is
+where RGB is nearly blind, so there is little to add --- and honestly, the night gain ($-3.1$) sits
+\emph{right at} the two-sigma bar ($\approx3.7$): real, but modest and borderline-significant, which
+we report as such rather than overselling. Crucially, fusion did not let the useless night-time RGB
+stream drag thermal down; it preserved thermal's advantage.
+
+\begin{lesson}
+Error bars change the story you are allowed to tell. On a single seed the night improvement looked
+like a clean win ($-1.9$); across five seeds it is $-3.1\pm$noise, hugging the significance
+threshold. Without the noise floor we would have reported a night result we could not actually
+defend. The five-seed protocol is not bureaucracy --- it is the difference between a claim and a
+guess, and here it downgraded one of our three headline numbers from ``win'' to ``modest, borderline.''
+\end{lesson}
 
 \section{The disproof of the APEX trap}
 
@@ -106,9 +116,11 @@ data was correct and the plot was wrong. Verify the tool before you doubt the re
 
 \section{What remains before Phase 2}
 
-Two loose ends close Phase~1: the five-seed noise floor for F-cat-345 (so this win carries error
-bars), and the width-matched control (so it cannot be attributed to parameter count). Then the
-anchor is set, and Phase~2 begins varying the one thing we have so far held fixed --- \emph{where}
-in the backbone the two cameras meet.
+The five-seed noise floor above puts error bars on the win. One loose end closes Phase~1: the
+width-matched control --- a single-camera model widened to F-cat-345's $\sim13.84$M parameters
+(\texttt{base\_ch}=42 gives $14.06$M) --- so the improvement cannot be attributed to parameter
+count rather than to fusion. If a single camera with fusion's parameter budget still loses, the win
+is genuinely about \emph{combining} cameras. Then the anchor is set, and Phase~2 begins varying the
+one thing we have so far held fixed --- \emph{where} in the backbone the two cameras meet.
 
 \end{document}
