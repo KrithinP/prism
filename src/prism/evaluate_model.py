@@ -74,7 +74,7 @@ def evaluate_checkpoint(ckpt_path, root, modality=None, splits=("test", "test-da
 
     if modality == "fusion":
         from prism.models.yolox_fusion import TwoStreamYOLOX
-        model = TwoStreamYOLOX(num_classes=1)
+        model = TwoStreamYOLOX(num_classes=1, fuse_stages=tuple(ck.get('fuse_stages', (3,4,5))))
     else:
         model = YOLOX(num_classes=1, base_ch=ck.get("base_ch", 32))
     model.load_state_dict(ck["model"])

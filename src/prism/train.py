@@ -112,7 +112,7 @@ def require_device(allow_cpu=False):
 
 def train(root, modality="rgb", lr=0.01, epochs=10, batch_size=8,
           seed=0, limit=None, out="checkpoints", positives_only=False,
-          split="train", allow_cpu=False, save_every=0, base_ch=32):
+          split="train", allow_cpu=False, save_every=0, base_ch=32, fuse_stages=(3,4,5)):
     set_seed(seed)
     device = require_device(allow_cpu)
     # Create the checkpoint dir UP FRONT: a bad path must fail in a second, not after
@@ -138,7 +138,7 @@ def train(root, modality="rgb", lr=0.01, epochs=10, batch_size=8,
     loader = DataLoader(ds, batch_size=batch_size, shuffle=True, num_workers=4,
                         collate_fn=collate, drop_last=True)
 
-    model = (TwoStreamYOLOX(num_classes=1) if is_fusion
+    model = (TwoStreamYOLOX(num_classes=1, fuse_stages=fuse_stages) if is_fusion
              else YOLOX(num_classes=1, base_ch=base_ch)).to(device).train()
     lossfn = YOLOXLoss(num_classes=1)
     opt = build_optimizer(model, lr)
@@ -195,12 +195,12 @@ def train(root, modality="rgb", lr=0.01, epochs=10, batch_size=8,
         if save_every and (epoch + 1) % save_every == 0 and (epoch + 1) != epochs:
             ck = Path(out) / f"{modality}_seed{seed}_e{epoch + 1}.pt"
             torch.save({"model": model.state_dict(), "modality": modality,
-                        "seed": seed, "epoch": epoch + 1, "base_ch": base_ch}, ck)
+                        "seed": seed, "epoch": epoch + 1, "base_ch": base_ch, "fuse_stages": list(fuse_stages)}, ck)
             print(f"saved {ck}")
 
     ckpt = Path(out) / f"{modality}_seed{seed}.pt"
     torch.save({"model": model.state_dict(), "modality": modality,
-                "seed": seed, "epoch": epochs, "base_ch": base_ch}, ckpt)
+                "seed": seed, "epoch": epochs, "base_ch": base_ch, "fuse_stages": list(fuse_stages)}, ckpt)
     print(f"saved {ckpt}")
     return model
 
@@ -223,11 +223,14 @@ def main():
                     help="permit CPU training (very slow); default is to fail loudly")
     ap.add_argument("--save-every", type=int, default=0,
                     help="also save a checkpoint every N epochs (for epoch calibration)")
+    ap.add_argument("--fuse-stages", default="345",
+                    help="which backbone depths fuse, e.g. 345 (all), 3, 4, 5 (Phase 2)")
     ap.add_argument("--base-ch", type=int, default=32,
                     help="backbone width (32=default 8.94M; 42~=fusion 13.84M for the width control)")
     a = ap.parse_args()
     train(a.root, a.modality, a.lr, a.epochs, a.batch_size, a.seed, a.limit, a.out,
-          a.positives_only, a.split, a.allow_cpu, a.save_every, a.base_ch)
+          a.positives_only, a.split, a.allow_cpu, a.save_every, a.base_ch,
+          tuple(int(c) for c in a.fuse_stages))
 
 
 if __name__ == "__main__":
