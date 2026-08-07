@@ -1,10 +1,10 @@
-
 """The head must emit 4+1+num_classes channels at each of the three scales."""
+
 import torch
 
 from prism.models.darknet import CSPDarknet
-from prism.models.pafpn import PAFPN
 from prism.models.head import DecoupledHead
+from prism.models.pafpn import PAFPN
 
 
 def test_head_output_shapes_single_class():

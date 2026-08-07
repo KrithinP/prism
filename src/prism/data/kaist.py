@@ -1,28 +1,34 @@
 """Paired KAIST loader: one frame index -> (rgb, thermal, boxes, classes, occlusion)."""
+
 from __future__ import annotations
-import xml.etree.ElementTree as ET   # ET = ElementTree, Python's built-in XML parser
+
+import xml.etree.ElementTree as ET  # ET = ElementTree, Python's built-in XML parser
 from pathlib import Path
 
-import cv2                            # OpenCV: image decode
+import cv2  # OpenCV: image decode
 import numpy as np
 import torch
 from torch.utils.data import Dataset
 
 from prism.data.kaist_constants import (
-    POSITIVE_CLASSES, VISIBLE_DIRNAME, LWIR_DIRNAME,
+    LWIR_DIRNAME,
+    POSITIVE_CLASSES,
+    VISIBLE_DIRNAME,
 )
 
 
 def parse_annotation(xml_path: Path) -> dict:
     """Read one KAIST XML into arrays. Boxes come out as (x1,y1,x2,y2) pixels."""
     boxes, classes, occ = [], [], []
-    if xml_path.exists():                         # frames with no people have no <object>
+    if xml_path.exists():  # frames with no people have no <object>
         root = ET.parse(xml_path).getroot()
         for obj in root.findall("object"):
             name = obj.findtext("name")
             b = obj.find("bndbox")
-            x = float(b.findtext("x")); y = float(b.findtext("y"))
-            w = float(b.findtext("w")); h = float(b.findtext("h"))
+            x = float(b.findtext("x"))
+            y = float(b.findtext("y"))
+            w = float(b.findtext("w"))
+            h = float(b.findtext("h"))
             # THE conversion: KAIST stores top-left + width/height. We want two corners.
             boxes.append([x, y, x + w, y + h])
             # 1 = a scored positive ('person'); 0 = an ignore region (people/cyclist/person?).
@@ -43,19 +49,34 @@ class PairedKAIST(Dataset):
       annotations-xml-new-sanitized/setXX/VYYY/IZZZZZ.xml
     """
 
-    def __init__(self, root: str, ann_dirname: str = "annotations-xml-new-sanitized",
-                 split_file: str | None = None):
+    def __init__(
+        self,
+        root: str,
+        ann_dirname: str = "annotations-xml-new-sanitized",
+        split_file: str | None = None,
+        strict: bool = True,
+    ):
         self.root = Path(root)
         self.ann_root = self.root / ann_dirname
         if split_file is not None:
             # Obey the official protocol list (set-split + frame-sampling baked in).
             ids = [ln.strip() for ln in Path(split_file).read_text().splitlines() if ln.strip()]
-            self.ids = [fid for fid in ids if self._pair_exists(fid)]
+            missing = [fid for fid in ids if not self._pair_exists(fid)]
+            if missing and strict:
+                raise FileNotFoundError(
+                    f"{len(missing)} of {len(ids)} frames in {split_file} are missing "
+                    f"an RGB/LWIR pair, e.g. {missing[:3]}"
+                )
+            # An audit must see missing IDs rather than filtering them away.
+            self.ids = ids
         else:
             # Fallback: discover every frame that has BOTH modalities on disk.
             vis = sorted((self.root / "images").rglob(f"{VISIBLE_DIRNAME}/*.jpg"))
-            self.ids = [self._id_from_visible(p) for p in vis
-                        if p.with_name(p.name).parent.parent.joinpath(LWIR_DIRNAME, p.name).exists()]
+            self.ids = [
+                self._id_from_visible(p)
+                for p in vis
+                if p.with_name(p.name).parent.parent.joinpath(LWIR_DIRNAME, p.name).exists()
+            ]
 
     def _pair_exists(self, fid: str) -> bool:
         vis_p, lwir_p, _ = self._paths(fid)
@@ -69,9 +90,11 @@ class PairedKAIST(Dataset):
     def _paths(self, fid: str):
         setname, vid, frame = fid.split("/")
         base = self.root / "images" / setname / vid
-        return (base / VISIBLE_DIRNAME / f"{frame}.jpg",
-                base / LWIR_DIRNAME / f"{frame}.jpg",
-                self.ann_root / setname / vid / f"{frame}.xml")
+        return (
+            base / VISIBLE_DIRNAME / f"{frame}.jpg",
+            base / LWIR_DIRNAME / f"{frame}.jpg",
+            self.ann_root / setname / vid / f"{frame}.xml",
+        )
 
     def __len__(self) -> int:
         return len(self.ids)
@@ -80,11 +103,18 @@ class PairedKAIST(Dataset):
         fid = self.ids[i]
         vis_p, lwir_p, xml_p = self._paths(fid)
         # cv2 decodes as BGR; flip to RGB so channel order matches every pretrained backbone.
-        rgb = cv2.cvtColor(cv2.imread(str(vis_p)), cv2.COLOR_BGR2RGB)
-        thm = cv2.cvtColor(cv2.imread(str(lwir_p)), cv2.COLOR_BGR2RGB)
+        rgb_raw = cv2.imread(str(vis_p), cv2.IMREAD_COLOR)
+        thm_raw = cv2.imread(str(lwir_p), cv2.IMREAD_COLOR)
+        if rgb_raw is None or thm_raw is None:
+            raise OSError(f"failed to decode paired frame {fid}: rgb={vis_p}, lwir={lwir_p}")
+        rgb = cv2.cvtColor(rgb_raw, cv2.COLOR_BGR2RGB)
+        thm = cv2.cvtColor(thm_raw, cv2.COLOR_BGR2RGB)
         ann = parse_annotation(xml_p)
+
         # HWC uint8 -> CHW float tensor. (H=height, W=width, C=channel.)
-        to_chw = lambda a: torch.from_numpy(a).permute(2, 0, 1).contiguous()
+        def to_chw(array):
+            return torch.from_numpy(array).permute(2, 0, 1).contiguous()
+
         return {
             "id": fid,
             "rgb": to_chw(rgb),
@@ -105,14 +135,42 @@ class PairedKAIST(Dataset):
 # (The old annotations-xml-new{,-sanitized} dirs were a byte-identical duplicate; they
 # are left in place but no longer referenced. See decisions log 2026-07-24 / 07-29.)
 _SPLITS = {
-    "train":      ("train-sanitized.txt", "annotations-sanitized-train"),
-    "test":       ("test-all-20.txt",     "annotations-improved-test"),
-    "test-day":   ("test-day-20.txt",     "annotations-improved-test"),
-    "test-night": ("test-night-20.txt",   "annotations-improved-test"),
+    "train": ("train-sanitized.txt", "annotations-sanitized-train"),
+    "test": ("test-all-20.txt", "annotations-improved-test"),
+    "test-day": ("test-day-20.txt", "annotations-improved-test"),
+    "test-night": ("test-night-20.txt", "annotations-improved-test"),
 }
 
 
-def kaist_split(root: str, split: str) -> "PairedKAIST":
+def kaist_split(root: str, split: str) -> PairedKAIST:
     """Build a PairedKAIST for a named protocol split ('train'/'test'/'test-day'/'test-night')."""
     fname, ann = _SPLITS[split]
     return PairedKAIST(root, ann_dirname=ann, split_file=str(Path(root) / "imageSets" / fname))
+
+
+# Frozen sequence-disjoint cross-validation lists (TODO.md 4.2), committed in the
+# repo's splits/ directory by scripts/make_splits.py -- NOT under the data root.
+_CV_LISTS = {
+    "train-cv": ("splits/train.txt", "annotations-sanitized-train"),
+    "val-cv": ("splits/val.txt", "annotations-sanitized-train"),
+}
+
+
+def kaist_split_cv(root: str, split: str) -> PairedKAIST:
+    """train-cv / val-cv from the frozen sequence-disjoint lists (splits/*.txt)."""
+    if split not in _CV_LISTS:
+        raise KeyError(f"not a cv split: {split} (expected train-cv/val-cv)")
+    repo = Path(__file__).resolve().parents[3]
+    fname, ann = _CV_LISTS[split]
+    return PairedKAIST(root, ann_dirname=ann, split_file=str(repo / fname))
+
+
+def day_frame_ids(root: str) -> set[str]:
+    """Test frames that belong to the Day subset (first 1455 sorted test ids).
+
+    The canonical evaluator needs an is_day flag per frame; the protocol's
+    Day/Night boundary is set membership in the official lists, so this loads
+    them rather than re-deriving the boundary.
+    """
+    day = Path(root) / "imageSets" / "test-day-20.txt"
+    return {ln.strip() for ln in day.read_text().splitlines() if ln.strip()}

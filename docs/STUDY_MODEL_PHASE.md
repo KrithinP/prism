@@ -1,5 +1,9 @@
 # Concepts to learn — the model-building phase
 
+> **Historical educational note.** This is a learning aid, not the current
+> architecture or experiment specification. See `../EXPLANATION.md` and
+> `EXPERIMENT_PLAN.md` for authoritative definitions.
+
 In build order. Each concept is needed for the code you type right after it.
 **[core]** = you must understand it. **[skim]** = know what it is, move on.
 

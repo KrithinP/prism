@@ -1,0 +1,46 @@
+# The immutable architecture-study recipe (TODO.md Phase 3).
+# Every comparable arm uses exactly this config; differences are interventions.
+# Mirror of src/prism/protocol.py RECIPE -- keep the two in sync.
+
+data:
+  split_policy: sequence-disjoint   # set/video granularity, never per frame
+  train_annotations: annotations-sanitized-train
+  input_size: [640, 512]            # KAIST native, divisible by 32
+  batch_size: 8
+
+optimization:
+  epochs: 40
+  optimizer: SGD
+  momentum: 0.9
+  nesterov: true
+  base_lr: 0.01
+  weight_decay: 0.0005              # none on BN weights/biases
+  schedule: linear-warmup + cosine
+  warmup_fraction: 0.05
+  max_grad_norm: 10.0
+  amp: true
+  ema: false                        # raw weights are the primary checkpoint
+
+augmentation:
+  paired_geometric: [PairedHFlip(p=0.5)]
+  rgb_photometric: [RGBPhotometric(brightness=0.2, contrast=0.2)]
+  thermal_photometric: none         # thermal pixels are a measurement, not a look
+  mosaic: none                      # deferred (no-augmentation policy is Phase 3 scope)
+  core_modality_dropout: 0.0        # robustness arms D1/D3 use 0.2
+  core_thermal_shift_px: 0          # robustness arms D2/D3 use 8
+
+training:
+  label_assignment: SimOTA          # frozen, never tweaked per arm
+  loss_weights: {iou: 5.0, obj: 1.0, cls: 1.0}
+  num_workers: 4
+  checkpoint_every_epochs: 10
+  validation_every_epochs: 10
+  history_every_steps: 20
+  seeds: [0, 1, 2, 3, 4]
+
+evaluation:
+  primary_metric: reasonable_all_mr # on VALIDATION only, for selection
+  secondary: [day_mr, night_mr, recall@0.1_fppi, recall@1.0_fppi, params, flops, latency]
+  nms_iou: 0.65
+  conf_floor: 0.001
+  official_test: false              # flipped only by the frozen release gate

@@ -1,9 +1,9 @@
-
 """The four building blocks of CSPDarknet. See textbook Ch.4."""
+
 from __future__ import annotations
 
 import torch
-import torch.nn as nn
+from torch import nn
 
 
 class ConvBNAct(nn.Module):
@@ -11,9 +11,11 @@ class ConvBNAct(nn.Module):
 
     def __init__(self, in_ch, out_ch, k=1, stride=1, groups=1):
         super().__init__()
-        pad = (k - 1) // 2                       # 'same' padding for odd kernels
+        pad = (k - 1) // 2  # 'same' padding for odd kernels
         self.conv = nn.Conv2d(in_ch, out_ch, k, stride, pad, groups=groups, bias=False)
-        self.bn = nn.BatchNorm2d(out_ch)
+        # Match the official YOLOX Exp initialization. These values are part of
+        # the detector base, so every fusion arm must inherit the same setting.
+        self.bn = nn.BatchNorm2d(out_ch, eps=1e-3, momentum=0.03)
         self.act = nn.SiLU(inplace=True)
 
     def forward(self, x):
@@ -42,8 +44,8 @@ class CSPLayer(nn.Module):
     def __init__(self, in_ch, out_ch, n=1, shortcut=True, expansion=0.5):
         super().__init__()
         hidden = int(out_ch * expansion)
-        self.conv1 = ConvBNAct(in_ch, hidden, k=1)       # branch that gets processed
-        self.conv2 = ConvBNAct(in_ch, hidden, k=1)       # branch that skips ahead
+        self.conv1 = ConvBNAct(in_ch, hidden, k=1)  # branch that gets processed
+        self.conv2 = ConvBNAct(in_ch, hidden, k=1)  # branch that skips ahead
         self.conv3 = ConvBNAct(2 * hidden, out_ch, k=1)  # merge the two branches
         self.blocks = nn.Sequential(
             *[Bottleneck(hidden, hidden, shortcut, expansion=1.0) for _ in range(n)]

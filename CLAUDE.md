@@ -1,130 +1,122 @@
-# PRISM — Middle-Fusion RGB-Thermal Detection
+# PRISM: Controlled RGB-Thermal Fusion
 
-This repo sits inside Krithin's AI Operating System (root AIOS at `../../CLAUDE.md`). The root
-instructions still apply — voice, model routing, working style. This file adds only what's
-specific to PRISM.
+This repository is an empirical architecture study of visible/thermal pedestrian
+detection on KAIST. Read `EXPLANATION.md`, `docs/EXPERIMENT_PLAN.md`, and
+`TODO.md` before changing the protocol.
 
-## What this is
+## Current Status (2026-08-06)
 
-An empirical architecture study on **middle (halfway) fusion** of RGB + thermal for object
-detection, on a **YOLOX** base, benchmarked on **KAIST**. Assigned by Soham as a research-method
-exercise: learn how architectural research is actually done — hypothesis, controls, ablation
-grid, honest metrics — rather than reasoning about fusion from an armchair.
+The corrected, validation-first implementation is ready for execution on the
+training machine. It has not been trained in this checkout. Earlier 8/16-epoch
+runs selected or evaluated architecture choices on the official test set; their
+numbers and figures are quarantined as exploratory history in `docs/RESULTS.md`
+and `docs/textbook/`. They are not scientific evidence for the corrected study.
 
-Target: **report + reproducible repo in 4–6 weeks** (started 2026-07-13).
+The current system includes:
 
-## Status (2026-07-30)
+- a YOLOX-S-derived CSPDarknet/PAFPN/decoupled-head base;
+- YOLOX-consistent BatchNorm, IoU loss, SimOTA, and NMS semantics;
+- KAIST ignore-region handling in both training and evaluation;
+- early, one-shot, multi-scale middle, and late fusion graphs;
+- ten fusion mechanisms, two parameter-matched operator controls, and
+  capacity/nestedness controls;
+- deterministic robustness interventions and representation diagnostics;
+- five-seed, validation-only architecture selection;
+- a fail-closed official-test release firewall;
+- a canonical evaluator differentially certified against the pinned MLPD code.
 
-**Phase 1 nearly complete — fusion works.** Full pipeline end-to-end: CSPDarknet → PAFPN →
-decoupled head → YOLOX (8.94M) → loss + SimOTA → training loop → protocol splits → MR⁻² (full
-scale/occlusion suite). Two-stream fusion (`TwoStreamYOLOX`, 13.84M) built and validated.
-**39 tests green.**
+## Frozen Protocol
 
-**Recipe locked:** lr = 0.01 (sweep), 16 epochs (calibration showed from-scratch plateaus fast;
-~35% is the data-limited ceiling, modern methods reach ~19% via pretraining). Real annotations
-installed (see below). Results in `docs/RESULTS.md`; the textbook (`docs/textbook/`, 11 chapters)
-narrates the whole build.
+```text
+train annotations: MSDS sanitized, 7,601 pairs
+selection:         sequence-disjoint train-cv / val-cv
+final test:        improved test annotations, 2,252 pairs
+input:             640x512
+initial training:  from scratch, exactly 40 epochs
+seeds:             0,1,2,3,4
+primary metric:    validation Reasonable All MR^-2
+test access:       frozen manifest only
+```
 
-**Headline results (improved-test, from scratch, 5 seeds unless noted):**
-- thermal-only: All 36.1±1.3 / Day 43.9 / Night 20.6±1.2
-- RGB-only:     All 52.5±1.5 / Day 46.3 / Night 65.9±0.9 (near-blind at night)
-- **F-cat-345 fusion (seed 0):** All **27.3** / Day **31.6** / Night **18.7** — beats thermal by
-  8.8/12.3/1.9, past the ~2.5 noise bar; beats BOTH cameras in Day → real cross-modal benefit,
-  not the APEX single-modality trap. 5-seed noise floor pending.
+Initial experiments deliberately fix secondary decisions such as epochs. Horizon
+saturation is a later confirmation after the major architecture and operator
+decisions are frozen.
 
-**From-scratch bugs found + regression-tested:** (1) missing prior-bias init → all-background
-objectness ≈18,000 → SGD NaN (fix: bias = −log((1−π)/π), π=0.01); the AdamW overfit test missed
-it, SGD exposed it. (2) SimOTA's BCE is AMP-unsafe → run the cost in fp32, autocast off.
-(3) divergence guard on a smoothed EMA (a single-batch limit false-fired at step 22).
+The graph is YOLOX-S-derived, but the 40-epoch from-scratch recipe is specific to
+this controlled study. Do not describe it as an exact reproduction of the
+official 300-epoch YOLOX recipe.
 
-**Next:** F-cat-345 seeds 1–4 (fusion noise floor) → width-matched control → evaluator
-verification → **Phase 2: fusion-depth sweep** (dark3/4/5/all, `fuse_stages` already supports it).
+## Execution
 
-### Annotations (resolved 2026-07-29 — now leaderboard-comparable)
+```sh
+uv sync --extra dev --python 3.11
+source .venv/bin/activate
 
-The real sets are installed and wired: **`annotations-sanitized-train`** (Li et al./MSDS-RCNN,
-7,601 frames — the field's standard training set, listed in `imageSets/train-sanitized.txt`) and
-**`annotations-improved-test`** (Liu et al. 2016, covering all 2,252 test frames). Converted from
-bbGt text to XML by `scripts/convert_kaist_bbgt.py`; `_SPLITS` points at them. (The old
-`annotations-xml-new{,-sanitized}` dirs were a byte-identical duplicate — left in place,
-unreferenced.) Numbers are now internally valid AND comparable to the published leaderboard, though
-absolute levels stay in the from-scratch regime.
+make prepare-kaist
+make certify-evaluator
+make test
+make preflight
+make study-discovery
+make data-stats
+make study-operators
+make study-robustness
+make summary
+```
 
-**Locked training directives (Soham, see decisions log):** train **from scratch** (small model +
-small data); **5 seeds on every experiment** (mean±std, 2σ bar); small **LR + LR-decay sweep**
-before locking the recipe; report the **full standard KAIST metric suite** (MR⁻² Reasonable
-All/Day/Night primary; scale/occlusion subsets secondary; **mAP a cross-check only** — it hid the
-Apollyon modality-collapse). Recipe held fixed across all experiments once set.
+`make study-all` performs the experimental stages in that order and then runs
+the predeclared profiling, intervention, representation, attribution, and
+sequence-bootstrap suite. Do not bypass preflight for a full run.
 
-Docs kept in sync: textbook `docs/textbook/` (Ch.1–5), paper skeleton `docs/paper/main.tex`,
-visual trace `docs/PIPELINE_TRACE.md`, build-order study list `docs/STUDY_MODEL_PHASE.md`.
+## Scientific Rules
 
-## Working agreement (binding)
+- Never use official test data for training, hyperparameters, architecture
+  choice, checkpoint choice, threshold choice, or qualitative example choice.
+- Every core learned arm uses all five frozen seeds and exactly 40 epochs.
+- Block B reports early and late fusion, but selects the Block C template only
+  from feature-fusion graphs B2-B10.
+- Block C holds that graph fixed while changing only the fusion operator.
+- Block D is a separate robustness-training study, not a replacement for clean
+  architecture selection.
+- A fusion win must be compared with both unimodal baselines, wider unimodal
+  controls, duplicated-input branches, late ProbEn, compute, and degradation.
+- Report raw per-seed and per-frame values before summaries. Never silently omit
+  failed seeds.
+- Attention, gates, CKA, and effective rank are descriptive. Model-behavior
+  causal claims require fixed-checkpoint interventions with paired uncertainty.
+- The nested residual controls equal their own anchor feature at initialization
+  and contain that function in the hypothesis class. They do not guarantee SGD
+  will preserve an independently trained unimodal detector.
 
-- **R1 — Krithin types all implementation code.** Claude provides reference code, reviews, and
-  explains. Claude makes direct edits to implementation code only on explicit command. Repo
-  scaffolding, configs, docs, and the textbook are Claude's to write.
-- **R2 — Theory before build.** Claude delivers the phase's theory brief / curriculum gate before
-  any code for that phase is written. Krithin reads it first. No exceptions — the whole point of
-  this project is the learning, not the artifact.
-- **R3 — Claude authors the LaTeX textbook** (`docs/textbook/`) and all documentation directly,
-  in the same session anything textbook-worthy happens (a result, a failure + its lesson, a
-  decision, a first success).
-  - *Textbook format (binding):* the book uses the `subfiles` package. `main.tex` holds the one
-    shared preamble; every chapter starts `\documentclass[../main.tex]{subfiles}` so it compiles
-    **both** on its own and as part of the book, with zero preamble duplication. Keep listings
-    language-agnostic (no `language=XML`) so any snippet compiles on stock Overleaf/TeX Live.
-    Krithin works chapter-by-chapter in Overleaf: he uploads/zip-imports `docs/textbook/` and each
-    chapter recompiles by itself. Do not write a chapter that only compiles via `main.tex`.
+## Dataset Facts
 
-## The facts that will bite you
+KAIST uses beam-splitter, synchronized RGB/thermal capture, so the original
+120 Hz/60 Hz asynchronous deployment problem is not directly identified by this
+benchmark. Residual weak alignment still exists. Controlled spatial shifts are
+therefore a robustness experiment, not a claim that KAIST reproduces the target
+rig's timing and parallax.
 
-- **KAIST is beam-splitter aligned *by design*, but only weakly aligned *in practice*.** Get this
-  distinction right; an earlier version of this file got it wrong.
-  - *By design:* Hwang et al. used a beam splitter, so the two cameras are co-axial — there is no
-    large-baseline parallax — and pairs are hardware-captured at 20 Hz, so there is no frame-rate
-    skew. Krithin's 120fps-RGB / 60fps-thermal problem and his parallax-from-physical-separation
-    problem are **the Apollyon rig's, not the benchmark's**.
-  - *In practice:* the pairs are **not strictly aligned**. AR-CNN (Zhang et al., ICCV 2019) showed
-    the same pedestrian sits at different pixel positions in RGB vs thermal, and released
-    **KAIST-Paired** per-modality annotations to quantify it. The whole field trains through this
-    residual shift silently.
-  - *Consequence for PRISM:* misalignment robustness is a real axis with **two** instruments —
-    **measure** the shift that is already there (KAIST-Paired), and **inject** controlled extra
-    shift/scale/temporal skew to sweep the axis under control. Injection alone would have been
-    simulating a problem the data already has.
-- **The metric is MR⁻²**, log-average miss rate over FPPI ∈ [10⁻², 10⁰] on the *reasonable*
-  subset, split All / Day / Night. Lower is better. It is **not** mAP.
-- **Annotations matter more than the model.** Use the sanitized train + improved test annotation
-  sets the field standardized on. Training or evaluating on the raw 2015 annotations silently
-  makes every number incomparable to every published result.
-- **Thermal-only is a strong baseline on KAIST** — it beats RGB-only overall and dominates at
-  night. Any fusion model must be reported against it. "Fusion" that merely matches thermal-only
-  is a null result, and on APEX exactly this failure hid behind a clean daytime mAP of 0.99.
-- **"No attention" is too coarse a rule.** SE/CBAM-style channel and spatial gating cost a few
-  percent of FLOPs and belong in the grid. What's ruled out by onboard compute is *dense
-  cross-attention* over full feature maps. Grade every variant on params + FLOPs + latency.
+Use only the exact downloads and checks in `scripts/prepare_kaist.py` and
+`data/README.md`. Do not substitute KAIST-Paired or train02 while comparing
+against this protocol; those define different sample/annotation protocols and
+their paper numbers are not directly comparable.
 
-## Definition of done (per experiment)
+## Authoritative Files
 
-An experiment counts only when: it ran on the sanitized/improved annotations; it reports MR⁻² on
-All/Day/Night; it reports params and FLOPs; it is compared against RGB-only and thermal-only on
-the same seeds; and it is logged in W&B project `prism` and in the results ledger.
+- `EXPLANATION.md`: formulation, graph equations, arm definitions, interpretation
+- `docs/LITERATURE.md`: extended primary-source literature review
+- `docs/EXPERIMENT_PLAN.md`: frozen execution and statistical plan
+- `TODO.md`: remaining evidence gates
+- `data/README.md`: exact data sources, hashes, and layout
+- `src/prism/protocol.py`: machine-enforced frozen constants
+- `docs/RESULTS.md`: historical quarantine plus future corrected ledger
 
-Negative results get written down. That is the deliverable, not a failure of it.
+The fetched code under `external/MLPD-eval/` is ignored third-party reference
+material. `scripts/pin_mlpd_eval.py` fetches the exact audited commit and
+regenerates the tracked manifest. Do not format or modify the fetched copy;
+changes invalidate provenance and evaluator parity.
 
 ## Environment
 
-RTX 5070 Ti Laptop, 12 GB, **Blackwell sm_120** → requires PyTorch on **CUDA 12.8+** wheels.
-Older builds fail with "no kernel image is available for execution".
-
-## Where things live
-
-- `docs/LITERATURE.md` — paper trail, fusion taxonomy, evaluation protocol
-- `docs/CURRICULUM.md` — the ground-up study plan
-- `docs/PLAN.md` — phased build plan and the ablation grid
-- `docs/RESULTS.md` — the results ledger (every run, including the bad ones)
-- `docs/textbook/` — LaTeX textbook (R3)
-- `src/prism/` — implementation (Krithin's, per R1)
-
-Decisions and AIOS-level context live at the AIOS root (`decisions/log.md`), not here.
+The known training target is an RTX 5070 Ti Laptop with 12 GB. Blackwell
+`sm_120` requires CUDA 12.8-or-newer PyTorch wheels; this is configured in
+`pyproject.toml`. Confirm CUDA availability through `scripts/preflight.py`.

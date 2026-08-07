@@ -4,6 +4,7 @@ Given one frame's detections and ground-truth boxes, decide which detections are
 true positives, which are false positives, and which are absorbed by ignore
 regions (and therefore don't count at all). See textbook Ch.3.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -42,9 +43,9 @@ def match_frame(det_boxes, det_scores, gt_boxes, gt_ignore, iou_thr=0.5):
     gt_boxes = np.asarray(gt_boxes, np.float32).reshape(-1, 4)
     gt_ignore = np.asarray(gt_ignore, bool).reshape(-1)
 
-    order = np.argsort(-det_scores)            # highest confidence first
-    ious = box_iou(det_boxes, gt_boxes)        # (M, N)
-    gt_taken = np.zeros(len(gt_boxes), bool)   # each GT can be claimed once
+    order = np.argsort(-det_scores)  # highest confidence first
+    ious = box_iou(det_boxes, gt_boxes)  # (M, N)
+    gt_taken = np.zeros(len(gt_boxes), bool)  # each GT can be claimed once
 
     labels, scores = [], []
     for i in order:
@@ -54,13 +55,15 @@ def match_frame(det_boxes, det_scores, gt_boxes, gt_ignore, iou_thr=0.5):
             if gt_taken[k] or ious[i, k] < best:
                 continue
             j, best = k, ious[i, k]
-        if j == -1:                            # matched nothing -> false positive
-            labels.append(0); scores.append(det_scores[i])
-        elif gt_ignore[j]:                     # matched an ignore region -> discard entirely
-            gt_taken[j] = True                 # (still consume it so nothing else matches it)
-        else:                                  # matched a real pedestrian -> true positive
+        if j == -1:  # matched nothing -> false positive
+            labels.append(0)
+            scores.append(det_scores[i])
+        elif gt_ignore[j]:  # matched an ignore region -> discard entirely
+            gt_taken[j] = True  # (still consume it so nothing else matches it)
+        else:  # matched a real pedestrian -> true positive
             gt_taken[j] = True
-            labels.append(1); scores.append(det_scores[i])
+            labels.append(1)
+            scores.append(det_scores[i])
 
     n_pos = int((~gt_ignore).sum())
     return np.asarray(labels, np.int64), np.asarray(scores, np.float32), n_pos

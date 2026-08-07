@@ -1,5 +1,10 @@
 # PRISM — Curriculum
 
+> **Superseded educational draft.** This curriculum predates the corrected
+> validation-first protocol. It is retained as background reading only. It must
+> not determine data, evaluator, architecture, training, or reporting choices;
+> use `../EXPLANATION.md`, `EXPERIMENT_PLAN.md`, and `LITERATURE.md`.
+
 **Goal:** go from "strong robotics engineer who has trained detectors" to "professional in multispectral detection research" — able to design a middle-fusion RGB+Thermal detector on YOLOX, run an ablation study that a reviewer would accept, train it properly on KAIST, and report metrics that mean something.
 
 **Assumed starting point:** ROS2/PX4/Isaac Sim, PyTorch fluent, general CNNs, has trained detectors before. So this curriculum does **not** teach you backprop or what a convolution is. It teaches the things that will actually bite you.
@@ -452,20 +457,22 @@ https://arxiv.org/abs/1808.04818 · project: https://li-chengyang.github.io/home
 
 **And state the choice loudly in your report.** Papers using original vs sanitized annotations are **not comparable**, and half the confusion in this subfield comes from people not saying which they used. Being explicit here is free credibility.
 
-### [MUST] Experiment tracking — W&B
-https://wandb.ai/quickstart · Sweeps: https://docs.wandb.ai/models/sweeps
+### [MUST] Experiment tracking — immutable local artifacts
 
-**Do the quickstart (30 min), then set up your project before the first real training run — not after.**
+The corrected study intentionally has no hosted-tracker dependency. The
+append-only ledger, checkpoint metadata, raw JSONL histories, frozen manifests,
+and hashed diagnostic artifacts are the authoritative record.
 
 **What to log, from run #1:**
-- The **full config** (fusion stage, operator, seed, LR, schedule, annotation set, sampling rule, image size) — W&B config, not a comment in your code
+- The **full config** (fusion stage, operator, seed, LR, schedule, annotation set, sampling rule, image size)
 - **The git commit hash.** Every run. Non-negotiable — otherwise Week-6 you cannot reproduce Week-3's result.
 - **Params and GFLOPs**, as logged metrics, so they appear as table columns automatically
 - **MR (reasonable/day/night)**, mAP, and the full MR-FPPI curve
 - **Latency** on the target device (once you have Track 6 running)
 - A **qualitative image panel** — predictions on the same 8 fixed validation images, every run. You will catch bugs by eye that no metric will show you.
 
-**Use `wandb.Table` for the ablation results table so it builds itself.** Then use **Sweeps** for the *hyperparameter* search (LR, weight decay) — but note: **Sweeps are for hyperparameters, not for your ablation.** Your ablation rows are deliberate, controlled configs, not a random search. Do not confuse the two; this is a common and embarrassing mistake.
+Do not use a hyperparameter-sweep tool for architectural ablations. The rows are
+deliberate, controlled interventions executed by `scripts/run_experiments.py`.
 
 ### [REF] Reading & writing a results table
 There's no single paper for this. The rules:
@@ -559,7 +566,9 @@ Every ablation row gets: **Params (M) · GFLOPs · FP16 latency (ms) · INT8 lat
 - Stachniss: **Zhang's calibration method** + pinhole/intrinsics/homography lectures **[MUST]** (2h)
 
 **Build (~5h)**
-- **Lock the data.** Get the **sanitized training** annotations and **improved test** annotations. Fix your train/test frame-sampling rule to match the community convention. **Write it down in `docs/DATA.md`. Never change it again.**
+- **Lock the data.** Get the **sanitized training** annotations and **improved
+  test** annotations. The corrected protocol and exact sources are frozen in
+  `../data/README.md`; do not substitute another annotation/frame convention.
 - Implement and verify the **augmentation correspondence unit test**: assert that a geometric aug maps a known RGB pixel and its thermal counterpart to the same location; assert photometric augs touch RGB only.
 - Compute the **parallax table** for your real rig: pixel disparity at 3m / 10m / 30m given your baseline and focal length.
 
@@ -578,13 +587,14 @@ Every ablation row gets: **Params (M) · GFLOPs · FP16 latency (ms) · INT8 lat
 - **Picard (seeds)** + **Bouthillier §2–3** **[MUST]** (1.5h)
 - **ATSS §3**, re-read with methodology eyes **[MUST]** (1h)
 - **KAIST eval protocol** — read the evaluation *code*, not just the paper **[MUST]** (1.5h)
-- W&B quickstart **[MUST]** (0.5h)
+- Read the ledger and manifest contracts **[MUST]** (0.5h)
 
 **Build (~9h)**
 - Implement the **KAIST MR⁻² evaluator** and **verify it reproduces a published number** for a known method. **If your evaluator is wrong, every week after this is wasted. Do not skip the verification.**
 - Train the **four controls**: RGB-only, Thermal-only, Early fusion, Late fusion (ProbEn-style merge).
 - **Train the baseline 3–5× with different seeds. Compute σ of MR.**
-- Wire W&B: config, git hash, params, GFLOPs, MR-all/day/night, fixed qualitative image panel.
+- Verify local config/source hashes, params/MACs, MR-all/day/night, and fixed
+  diagnostic artifacts are recorded.
 
 **✅ Gate / understanding check:**
 1. **State your noise floor: "baseline MR = X ± σ over N seeds."** Write σ on a sticky note and put it on your monitor. **Every future claim must clear 2σ.**

@@ -1,5 +1,9 @@
 # PRISM — The Primer
 
+> **Historical educational note.** Some examples and framing here predate the
+> corrected protocol. Use it for concepts only; `../EXPLANATION.md`,
+> `EXPERIMENT_PLAN.md`, and `LITERATURE.md` define the actual study.
+
 *Read this before `LITERATURE.md`. That document is a reference written for someone already
 inside this subfield. This one builds the ideas from the ground up, in the order you actually
 need them, with real numbers from our own setup.*

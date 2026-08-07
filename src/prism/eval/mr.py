@@ -10,12 +10,15 @@ The mental model (worked example in the chat transcript / Ch.3):
   * At each step: miss_rate = 1 - TP/n_pos, and fppi = FP/n_images.
   * Read the miss rate at nine fixed false-alarm budgets, then geometric-mean them.
 """
+
 from __future__ import annotations
 
 import numpy as np
 
-# The nine FPPI reference points: log-spaced from 1e-2 to 1e0.
-REF_FPPI = np.logspace(-2.0, 0.0, num=9)
+# The nine FPPI reference points, EXACTLY as the pinned MLPD evaluation bundle
+# defines them (KAISTParams.fppiThrs): 0.0100 ... 1.0000, log-spaced but rounded
+# to four decimals. Using the bundle's array verbatim keeps sampling bit-identical.
+REF_FPPI = np.array([0.0100, 0.0178, 0.0316, 0.0562, 0.1000, 0.1778, 0.3162, 0.5623, 1.0000])
 
 
 def log_average_miss_rate(labels, scores, n_pos, n_images):
@@ -25,25 +28,27 @@ def log_average_miss_rate(labels, scores, n_pos, n_images):
     scores = np.asarray(scores, np.float32).reshape(-1)
 
     if n_pos == 0:
-        return float("nan")               # nothing to detect -> undefined
+        return float("nan")  # nothing to detect -> undefined
     if len(labels) == 0:
-        return 1.0                        # no detections at all -> miss everyone
+        return 1.0  # no detections at all -> miss everyone
 
     # Lower the threshold = walk detections high-score to low-score, accumulating.
-    order = np.argsort(-scores)
+    # mergesort/stable: the reference concatenates per-image sorted detections and
+    # argsorts once with kind='mergesort' -- ties keep (frame, input) order.
+    order = np.argsort(-scores, kind="stable")
     labels = labels[order]
-    tp = np.cumsum(labels == 1)           # true positives so far
-    fp = np.cumsum(labels == 0)           # false positives so far
+    tp = np.cumsum(labels == 1)  # true positives so far
+    fp = np.cumsum(labels == 0)  # false positives so far
 
-    miss_rate = 1.0 - tp / n_pos          # fraction of pedestrians still missed
-    fppi = fp / n_images                  # false positives per image
+    miss_rate = 1.0 - tp / n_pos  # fraction of pedestrians still missed
+    fppi = fp / n_images  # false positives per image
 
     # At each reference FPPI, read off the miss rate at that false-alarm budget.
     mrs = []
     for r in REF_FPPI:
-        ok = np.where(fppi <= r)[0]       # operating points within this budget
+        ok = np.where(fppi <= r)[0]  # operating points within this budget
         mrs.append(miss_rate[ok[-1]] if len(ok) else 1.0)
-    mrs = np.clip(np.asarray(mrs), 1e-10, 1.0)   # clip so log() is safe
+    mrs = np.clip(np.asarray(mrs), 1e-10, 1.0)  # clip so log() is safe
 
     # geometric mean = exp(mean(log(.)))
     return float(np.exp(np.mean(np.log(mrs))))

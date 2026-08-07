@@ -1,5 +1,9 @@
 # Pipeline Trace — one real image through PRISM
 
+> **Historical visualization.** This trace uses a manually selected official-test
+> frame and predates the validation firewall. It is retained for pipeline
+> intuition only and must not guide model or example selection.
+
 The living visual record: we follow **one real KAIST frame** (`set06/V000/I01259`, a daytime
 tree-lined avenue with a single pedestrian) through every step we've built, and watch what
 happens to it. Regenerate any time with `python scripts/trace_image.py`. This file grows as the

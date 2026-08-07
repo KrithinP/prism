@@ -30,6 +30,10 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 .ipynb_checkpoints/
 build/
 dist/
@@ -46,4 +50,8 @@ docs/textbook/**/*.fls
 # --- os ---
 .DS_Store
 docs/*.zip
-outputs/
+
+# --- fetched third-party references ---
+# Recreated at the pinned commit by scripts/pin_mlpd_eval.py. The manifest and
+# local YOLOX audit remain tracked under external/.
+external/MLPD-eval/

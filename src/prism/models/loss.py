@@ -6,13 +6,16 @@ hold it identical across every experiment and do not vary it. Read it (textbook
 Ch.6); do not tweak it per-experiment.
 
 Head output per scale: (B, 4+1+C, H, W) = [reg(4), obj(1), cls(C)].
-Targets: a length-B list of (Ni, 5) tensors, each row [cls, x1, y1, x2, y2] in pixels.
+Targets: a length-B list of (Ni, 5) tensors, each row [cls, x1, y1, x2, y2]
+in pixels. Class 0 is a positive pedestrian; class -1 is an ignore region whose
+anchors are excluded from negative objectness supervision.
 """
+
 from __future__ import annotations
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 
 def bboxes_iou(a, b):
@@ -30,6 +33,35 @@ def cxcywh_to_xyxy(boxes):
     return torch.cat([xy - wh / 2, xy + wh / 2], dim=-1)
 
 
+def yolox_iou_loss(iou):
+    """Official YOLOX IoU-loss form for decoded boxes: 1 - IoU squared."""
+    return 1.0 - iou.square()
+
+
+def centers_inside_boxes(centers, boxes_xyxy):
+    """Whether each anchor centre lies inside any box (inclusive boundaries)."""
+    if boxes_xyxy.numel() == 0:
+        return torch.zeros(centers.shape[0], dtype=torch.bool, device=centers.device)
+    inside = (
+        (centers[:, None, 0] >= boxes_xyxy[None, :, 0])
+        & (centers[:, None, 0] <= boxes_xyxy[None, :, 2])
+        & (centers[:, None, 1] >= boxes_xyxy[None, :, 1])
+        & (centers[:, None, 1] <= boxes_xyxy[None, :, 3])
+    )
+    return inside.any(dim=1)
+
+
+def yolox_center_prior(centers, strides, gt_cxcywh, radius: float = 1.5):
+    """Official current YOLOX SimOTA center constraint, shape (anchors, GT)."""
+    gt_centers = gt_cxcywh[:, :2]
+    return (
+        (centers[:, None, 0] >= gt_centers[None, :, 0] - radius * strides[:, None])
+        & (centers[:, None, 0] <= gt_centers[None, :, 0] + radius * strides[:, None])
+        & (centers[:, None, 1] >= gt_centers[None, :, 1] - radius * strides[:, None])
+        & (centers[:, None, 1] <= gt_centers[None, :, 1] + radius * strides[:, None])
+    )
+
+
 class YOLOXLoss(nn.Module):
     def __init__(self, num_classes=1, strides=(8, 16, 32)):
         super().__init__()
@@ -40,21 +72,25 @@ class YOLOXLoss(nn.Module):
     # ---- flatten head outputs and build per-anchor grid + stride ----
     def _gather(self, outputs):
         preds, grids, strides = [], [], []
-        for out, stride in zip(outputs, self.strides):
-            B, ch, H, W = out.shape
-            out = out.flatten(2).permute(0, 2, 1)          # (B, H*W, ch)
-            yv, xv = torch.meshgrid(torch.arange(H), torch.arange(W), indexing="ij")
-            grid = torch.stack((xv, yv), 2).reshape(1, H * W, 2).to(out.device).float()
+        for out, stride in zip(outputs, self.strides, strict=True):
+            _batch, _channels, H, W = out.shape
+            out = out.flatten(2).permute(0, 2, 1)  # (B, H*W, ch)
+            yv, xv = torch.meshgrid(
+                torch.arange(H, device=out.device),
+                torch.arange(W, device=out.device),
+                indexing="ij",
+            )
+            grid = torch.stack((xv, yv), 2).reshape(1, H * W, 2).float()
             preds.append(out)
             grids.append(grid)
             strides.append(torch.full((1, H * W, 1), stride, device=out.device).float())
-        preds = torch.cat(preds, 1)                        # (B, N, ch)
-        grids = torch.cat(grids, 1)                        # (1, N, 2)
-        strides = torch.cat(strides, 1)                    # (1, N, 1)
+        preds = torch.cat(preds, 1)  # (B, N, ch)
+        grids = torch.cat(grids, 1)  # (1, N, 2)
+        strides = torch.cat(strides, 1)  # (1, N, 1)
         # decode boxes to cxcywh in pixels (raw obj/cls kept as logits)
         xy = (preds[..., 0:2] + grids) * strides
         wh = torch.exp(preds[..., 2:4]) * strides
-        boxes = torch.cat([xy, wh], -1)                    # (B, N, 4) cxcywh
+        boxes = torch.cat([xy, wh], -1)  # (B, N, 4) cxcywh
         return preds, boxes, grids, strides
 
     def forward(self, outputs, targets):
@@ -69,23 +105,42 @@ class YOLOXLoss(nn.Module):
         for b in range(B):
             gt = targets[b].to(preds.device)
             obj_target = torch.zeros(N, device=preds.device)
+            centers = (grids[0] + 0.5) * strides[0]
+            positive = (
+                gt[:, 0] >= 0
+                if gt.numel()
+                else torch.zeros(0, dtype=torch.bool, device=preds.device)
+            )
+            ignore_xyxy = gt[~positive, 1:5] if gt.numel() else gt.new_zeros((0, 4))
+            obj_valid = ~centers_inside_boxes(centers, ignore_xyxy)
+            gt = gt[positive]
             if gt.numel() == 0:
-                total_obj = total_obj + self.bce(obj_logits[b], obj_target).sum()
+                total_obj = (
+                    total_obj + self.bce(obj_logits[b][obj_valid], obj_target[obj_valid]).sum()
+                )
                 continue
 
             gt_cls = gt[:, 0].long()
             gt_xyxy = gt[:, 1:5]
-            gt_cxcywh = torch.cat([(gt_xyxy[:, :2] + gt_xyxy[:, 2:]) / 2,
-                                   gt_xyxy[:, 2:] - gt_xyxy[:, :2]], 1)
+            gt_cxcywh = torch.cat(
+                [(gt_xyxy[:, :2] + gt_xyxy[:, 2:]) / 2, gt_xyxy[:, 2:] - gt_xyxy[:, :2]], 1
+            )
 
             fg_mask, matched_gt, matched_iou = self._assign(
-                boxes[b], cls_logits[b], obj_logits[b], grids[0], strides[0, :, 0],
-                gt_cxcywh, gt_cls,
+                boxes[b],
+                cls_logits[b],
+                obj_logits[b],
+                grids[0],
+                strides[0, :, 0],
+                gt_cxcywh,
+                gt_cls,
             )
             num_fg = int(fg_mask.sum())
             num_fg_total += num_fg
             obj_target[fg_mask] = 1.0
-            total_obj = total_obj + self.bce(obj_logits[b], obj_target).sum()
+            # A positive match wins if an imprecise ignore region overlaps it.
+            obj_valid[fg_mask] = True
+            total_obj = total_obj + self.bce(obj_logits[b][obj_valid], obj_target[obj_valid]).sum()
 
             if num_fg == 0:
                 continue
@@ -94,7 +149,7 @@ class YOLOXLoss(nn.Module):
             pred_fg = cxcywh_to_xyxy(boxes[b][fg_mask])
             gt_fg = gt_xyxy[matched_gt]
             iou = bboxes_iou(pred_fg, gt_fg).diagonal().clamp(min=1e-6)
-            total_iou = total_iou + (1 - iou).sum()
+            total_iou = total_iou + yolox_iou_loss(iou).sum()
 
             # classification loss on positives (soft target = onehot * iou)
             cls_t = F.one_hot(gt_cls[matched_gt], self.num_classes).float() * matched_iou[:, None]
@@ -102,11 +157,15 @@ class YOLOXLoss(nn.Module):
 
         denom = max(num_fg_total, 1)
         loss = (5.0 * total_iou + total_obj + total_cls) / denom
-        as_f = lambda v: (float(v.detach()) if torch.is_tensor(v) else float(v)) / denom
+
+        def normalized_float(value):
+            scalar = float(value.detach()) if torch.is_tensor(value) else float(value)
+            return scalar / denom
+
         return loss, {
-            "iou": as_f(total_iou) if num_fg_total else 0.0,
-            "obj": as_f(total_obj),
-            "cls": as_f(total_cls) if num_fg_total else 0.0,
+            "iou": normalized_float(total_iou) if num_fg_total else 0.0,
+            "obj": normalized_float(total_obj),
+            "cls": normalized_float(total_cls) if num_fg_total else 0.0,
             "num_fg": num_fg_total,
         }
 
@@ -115,23 +174,16 @@ class YOLOXLoss(nn.Module):
     def _assign(self, boxes, cls_logits, obj_logits, grids, strides, gt_cxcywh, gt_cls):
         N = boxes.shape[0]
         n_gt = gt_cxcywh.shape[0]
-        centers = (grids + 0.5) * strides[:, None]         # anchor centres in pixels
+        centers = (grids + 0.5) * strides[:, None]  # anchor centres in pixels
 
-        # 1) center prior: anchor centre inside gt box, or within radius*stride
+        # 1) Official YOLOX center prior. Current upstream samples anchors only
+        # inside a 1.5-stride square around each GT centre. Older upstream
+        # revisions used box-or-centre candidates; this project pins the current
+        # behavior and tests the exact boundary.
         gt_xyxy = cxcywh_to_xyxy(gt_cxcywh)
-        in_box = (
-            (centers[:, None, 0] >= gt_xyxy[None, :, 0]) & (centers[:, None, 0] <= gt_xyxy[None, :, 2]) &
-            (centers[:, None, 1] >= gt_xyxy[None, :, 1]) & (centers[:, None, 1] <= gt_xyxy[None, :, 3])
-        )
-        radius = 2.5
-        gc = gt_cxcywh[:, :2]
-        in_center = (
-            (centers[:, None, 0] >= gc[None, :, 0] - radius * strides[:, None]) &
-            (centers[:, None, 0] <= gc[None, :, 0] + radius * strides[:, None]) &
-            (centers[:, None, 1] >= gc[None, :, 1] - radius * strides[:, None]) &
-            (centers[:, None, 1] <= gc[None, :, 1] + radius * strides[:, None])
-        )
-        candidate = (in_box | in_center).any(1)            # (N,) anchors worth considering
+        radius = 1.5
+        in_center = yolox_center_prior(centers, strides, gt_cxcywh, radius)
+        candidate = in_center.any(1)  # (N,) anchors worth considering
         fg_mask = torch.zeros(N, dtype=torch.bool, device=boxes.device)
         matched_gt = torch.zeros(0, dtype=torch.long, device=boxes.device)
         matched_iou = torch.zeros(0, device=boxes.device)
@@ -139,15 +191,17 @@ class YOLOXLoss(nn.Module):
             return fg_mask, matched_gt, matched_iou
 
         cand_boxes = cxcywh_to_xyxy(boxes[candidate])
-        iou = bboxes_iou(cand_boxes, gt_xyxy)              # (Nc, n_gt)
+        iou = bboxes_iou(cand_boxes, gt_xyxy)  # (Nc, n_gt)
         iou_cost = -torch.log(iou + 1e-8)
 
         # classification cost: predicted score vs gt onehot.
         # BCE on sigmoided probs is unsafe under AMP autocast, and assignment should be
         # full-precision bookkeeping anyway, so compute it in fp32 with autocast off.
         with torch.autocast(device_type=boxes.device.type, enabled=False):
-            score = (cls_logits[candidate].float().sigmoid()
-                     * obj_logits[candidate].float().sigmoid()[:, None]).sqrt()
+            score = (
+                cls_logits[candidate].float().sigmoid()
+                * obj_logits[candidate].float().sigmoid()[:, None]
+            ).sqrt()
             # F.binary_cross_entropy carries a DEVICE-SIDE assert that its input is in
             # [0,1]. If training diverges the logits go NaN, clamp propagates NaN, the
             # assert fires -- and a device-side assert corrupts the CUDA context for the
@@ -157,11 +211,12 @@ class YOLOXLoss(nn.Module):
             gt_onehot = F.one_hot(gt_cls, self.num_classes).float()
             cls_cost = F.binary_cross_entropy(
                 score[:, None, :].expand(-1, n_gt, -1).clamp(1e-6, 1 - 1e-6),
-                gt_onehot[None].expand(score.shape[0], -1, -1), reduction="none",
+                gt_onehot[None].expand(score.shape[0], -1, -1),
+                reduction="none",
             ).sum(-1)
 
-        is_in = (in_box | in_center)[candidate]            # (Nc, n_gt)
-        cost = cls_cost + 3.0 * iou_cost + 1e5 * (~is_in)
+        is_in = in_center[candidate]  # (Nc, n_gt)
+        cost = cls_cost + 3.0 * iou_cost + 1e6 * (~is_in)
 
         # 2) dynamic-k matching
         matching = torch.zeros_like(cost)

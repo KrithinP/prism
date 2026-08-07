@@ -1,17 +1,18 @@
 """The two-stream fusion model must assemble, batch both cameras, and learn."""
+
 import torch
 
-from prism.models.yolox import YOLOX
-from prism.models.yolox_fusion import TwoStreamYOLOX
+from prism.data.detection import fusion_collate
 from prism.models.fusion import ConcatFuse, SumFuse
 from prism.models.loss import YOLOXLoss
-from prism.data.detection import fusion_collate
+from prism.models.yolox import YOLOX
+from prism.models.yolox_fusion import TwoStreamYOLOX
 
 
 def test_concat_fuse_preserves_shape():
     f = ConcatFuse(64)
     a, b = torch.randn(2, 64, 32, 40), torch.randn(2, 64, 32, 40)
-    assert f(a, b).shape == (2, 64, 32, 40)          # 2C in, C out
+    assert f(a, b).shape == (2, 64, 32, 40)  # 2C in, C out
 
 
 def test_sum_fuse_is_elementwise():
@@ -25,14 +26,17 @@ def test_two_stream_output_matches_single_stream_shapes():
     rgb, thm = torch.randn(2, 3, 512, 640), torch.randn(2, 3, 512, 640)
     outs = m(rgb, thm)
     assert [o.shape for o in outs] == [
-        (2, 6, 64, 80), (2, 6, 32, 40), (2, 6, 16, 20)]   # 4+1+1 = 6 per scale
+        (2, 6, 64, 80),
+        (2, 6, 32, 40),
+        (2, 6, 16, 20),
+    ]  # 4+1+1 = 6 per scale
 
 
 def test_two_stream_has_more_params_than_single():
     single = sum(p.numel() for p in YOLOX(num_classes=1).parameters())
     fused = sum(p.numel() for p in TwoStreamYOLOX(num_classes=1).parameters())
-    assert fused > single                             # two backbones + fusion convs
-    assert 1.4 < fused / single < 2.0                 # shared neck/head -> not a full 2x
+    assert fused > single  # two backbones + fusion convs
+    assert 1.4 < fused / single < 2.0  # shared neck/head -> not a full 2x
 
 
 def test_single_stage_config_still_feeds_all_scales():
@@ -45,7 +49,7 @@ def test_single_stage_config_still_feeds_all_scales():
 def test_fusion_collate_stacks_both_streams():
     batch = [
         (torch.zeros(3, 512, 640), torch.ones(3, 512, 640), torch.zeros(0, 5)),
-        (torch.zeros(3, 512, 640), torch.ones(3, 512, 640), torch.tensor([[0., 1, 2, 3, 4]])),
+        (torch.zeros(3, 512, 640), torch.ones(3, 512, 640), torch.tensor([[0.0, 1, 2, 3, 4]])),
     ]
     rgb, thm, targets = fusion_collate(batch)
     assert rgb.shape == (2, 3, 512, 640) and thm.shape == (2, 3, 512, 640)
@@ -64,7 +68,8 @@ def test_fusion_model_can_overfit_one_batch():
     for _ in range(150):
         opt.zero_grad()
         loss, _ = lossfn(model(rgb, thm), targets)
-        loss.backward(); opt.step()
+        loss.backward()
+        opt.step()
         if first is None:
             first = loss.item()
     assert loss.item() < 0.5 * first, f"did not overfit: {first:.3f} -> {loss.item():.3f}"

@@ -1,13 +1,21 @@
-# PRISM — Results Ledger
+# PRISM Archived Exploratory Results
+
+> **QUARANTINED: not admissible as corrected-study evidence.** These runs used
+> 8/16-epoch recipe selection and repeated improved-test evaluation, predate the
+> final evaluator parity fixes, used the invalid legacy `fuse_stages` graph, and
+> predate the YOLOX/ignore-region training corrections. The raw values are
+> preserved to document why the repository was rebuilt. Do not combine them with
+> `outputs/ledger.jsonl`, use them to select an architecture, or cite their deltas
+> as regime-independent.
 
 Every run that produced a number, including the bad ones. MR⁻² = log-average miss rate
 on the Reasonable subset, **lower is better**. All models from scratch (no pretraining),
 lr = 0.01, 16 epochs, batch 8, evaluated on the **improved-test** annotations (Liu et al.).
 Training set = **sanitized-train** (Li et al. / MSDS-RCNN), 7,601 frames.
 
-> **Comparability note:** absolute numbers are capped by the from-scratch regime
-> (~35% thermal-only vs ~19% for pretrained methods). The study's claims are *internal
-> deltas* vs these baselines, which are regime-independent. See decisions log 2026-07-24.
+The prose below is the historical interpretation written before the audit. It is
+not the current scientific conclusion. See `../EXPLANATION.md`,
+`EXPERIMENT_PLAN.md`, and `LITERATURE.md`.
 
 ## The noise floor (why deltas need error bars)
 
@@ -80,7 +88,8 @@ Thermal-only widened to **base_ch=42 (14.06M ≈ fusion's 13.84M)**, 5 seeds:
 moved MR by ~0 (36.1 → 36.1). Fusion, at the same budget, is **8.4 points better**. The win
 comes from *combining cameras*, not model size. **Phase 1 complete.**
 
-## Pending
+## Historical Pending State
 
 - [ ] Evaluator verification vs a published method's released detections
-- [~] Phase 2: fusion-depth sweep (dark3 / dark4 / dark5 vs 345 anchor) — **running (3 seeds)**
+- [ ] The historical depth sweep was retired; literal corrected graphs are Block B
+  in `scripts/run_experiments.py`.

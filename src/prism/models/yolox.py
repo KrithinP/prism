@@ -1,12 +1,13 @@
 """Single-stream YOLOX: backbone -> neck -> head, wired into one module.
 This is the RGB-only / thermal-only baseline model. See textbook Ch.4."""
+
 from __future__ import annotations
 
-import torch.nn as nn
+from torch import nn
 
 from prism.models.darknet import CSPDarknet
-from prism.models.pafpn import PAFPN
 from prism.models.head import DecoupledHead
+from prism.models.pafpn import PAFPN
 
 
 class YOLOX(nn.Module):

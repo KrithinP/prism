@@ -1,8 +1,14 @@
 """Correspondence guardrail: geometric augs must move both streams identically."""
+
 import torch
 
 # pyrefly: ignore [missing-import]
-from prism.data.transforms import PairedHFlip
+from prism.data.transforms import (
+    PairedHFlip,
+    PairedModalityDropout,
+    ThermalMisalignment,
+    translate_with_zeros,
+)
 
 
 def test_hflip_keeps_streams_aligned_and_moves_boxes():
@@ -36,3 +42,26 @@ def test_no_flip_when_p_zero():
     boxes = torch.tensor([[1.0, 1.0, 4.0, 4.0]])
     out_rgb, _, out_boxes = PairedHFlip(p=0.0)(rgb, thermal, boxes)
     assert torch.equal(out_rgb, rgb) and torch.equal(out_boxes, boxes)
+
+
+def test_translation_zero_pads_instead_of_wrapping():
+    image = torch.zeros(1, 3, 4)
+    image[0, 1, 0] = 1
+    shifted = translate_with_zeros(image, dx=-1, dy=0)
+    assert shifted.sum() == 0
+
+    image[0, 1, 1] = 2
+    shifted = translate_with_zeros(image, dx=1, dy=-1)
+    assert shifted[0, 0, 2] == 2
+    assert shifted[:, -1].sum() == 0
+
+
+def test_zero_strength_robustness_transforms_are_identity():
+    rgb = torch.rand(3, 8, 8)
+    thermal = torch.rand(3, 8, 8)
+    boxes = torch.tensor([[1.0, 1.0, 4.0, 4.0]])
+    for transform in (PairedModalityDropout(0.0), ThermalMisalignment(0)):
+        out_rgb, out_thermal, out_boxes = transform(rgb, thermal, boxes)
+        assert torch.equal(out_rgb, rgb)
+        assert torch.equal(out_thermal, thermal)
+        assert torch.equal(out_boxes, boxes)

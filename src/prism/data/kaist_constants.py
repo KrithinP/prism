@@ -16,14 +16,14 @@ MSDS-RCNN / MBNet / ProbEn. See docs/LITERATURE.md 1.3-1.4.
 # before scoring. This is why you must keep ignore boxes around at eval time rather
 # than deleting them; they suppress false positives you'd otherwise be charged for.
 POSITIVE_CLASSES = ("person",)
-IGNORE_CLASSES = ("people", "cyclist", "person?")   # present in labels, never scored as positives
+IGNORE_CLASSES = ("people", "cyclist", "person?", "person?a")
 ALL_CLASSES = POSITIVE_CLASSES + IGNORE_CLASSES
 
 # --- "Reasonable" evaluation subset ------------------------------------------
 # The headline MR^-2 is reported on pedestrians that are large enough and not
 # heavily hidden. Definition used across the literature:
-REASONABLE_MIN_HEIGHT = 55      # pixels; pedestrians shorter than this are ignored
-REASONABLE_MAX_OCCLUSION = 1    # occlusion 0 (none) or 1 (partial) kept; 2 (heavy) ignored
+REASONABLE_MIN_HEIGHT = 55  # pixels; pedestrians shorter than this are ignored
+REASONABLE_MAX_OCCLUSION = 1  # occlusion 0 (none) or 1 (partial) kept; 2 (heavy) ignored
 
 # Occlusion tag meanings, as stored in the XML <occlusion> field:
 OCCLUSION_NONE = 0

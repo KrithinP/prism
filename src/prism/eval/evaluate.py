@@ -1,16 +1,19 @@
-
 """Stage 4a: the Reasonable-subset filter, and dataset-level evaluation.
 
 Ties matching (Stage 1) and the log-average (Stages 2-3) into one number.
 See textbook Ch.3 Stage 4.
 """
+
 from __future__ import annotations
 
 import numpy as np
 
 from prism.data.kaist_constants import (
-    REASONABLE_MIN_HEIGHT, REASONABLE_MAX_OCCLUSION,
-    OCCLUSION_NONE, OCCLUSION_PARTIAL, OCCLUSION_HEAVY,
+    OCCLUSION_HEAVY,
+    OCCLUSION_NONE,
+    OCCLUSION_PARTIAL,
+    REASONABLE_MAX_OCCLUSION,
+    REASONABLE_MIN_HEIGHT,
 )
 from prism.eval.matching import match_frame
 from prism.eval.mr import log_average_miss_rate
@@ -26,15 +29,14 @@ def reasonable_ignore(gt_boxes, gt_classes, gt_occlusion):
     Ignored boxes still ABSORB detections (they just don't count either way).
     """
     gt_boxes = np.asarray(gt_boxes, np.float32).reshape(-1, 4)
-    heights = gt_boxes[:, 3] - gt_boxes[:, 1]          # xyxy -> height
+    heights = gt_boxes[:, 3] - gt_boxes[:, 1]  # xyxy -> height
     ignore = np.asarray(gt_classes, np.int64) == 0
     ignore |= heights < REASONABLE_MIN_HEIGHT
     ignore |= np.asarray(gt_occlusion, np.int64) > REASONABLE_MAX_OCCLUSION
     return ignore
 
 
-def subset_ignore(gt_boxes, gt_classes, gt_occlusion,
-                  min_height, max_height, allowed_occlusion):
+def subset_ignore(gt_boxes, gt_classes, gt_occlusion, min_height, max_height, allowed_occlusion):
     """True = don't score this box in THIS subset.
 
     Generalises `reasonable_ignore` to any (height range, occlusion set) condition.
@@ -46,7 +48,7 @@ def subset_ignore(gt_boxes, gt_classes, gt_occlusion,
     heights = gt_boxes[:, 3] - gt_boxes[:, 1]
     occ = np.asarray(gt_occlusion, np.int64)
 
-    ignore = np.asarray(gt_classes, np.int64) == 0        # not a scored 'person'
+    ignore = np.asarray(gt_classes, np.int64) == 0  # not a scored 'person'
     ignore |= heights < min_height
     ignore |= heights >= max_height
     ignore |= ~np.isin(occ, list(allowed_occlusion))
@@ -59,15 +61,15 @@ def subset_ignore(gt_boxes, gt_classes, gt_occlusion,
 #   name: (min_height, max_height, allowed occlusion tags)
 NON_HEAVY = (OCCLUSION_NONE, OCCLUSION_PARTIAL)
 SUBSETS = {
-    "reasonable":  (REASONABLE_MIN_HEIGHT, np.inf, NON_HEAVY),   # the headline
+    "reasonable": (REASONABLE_MIN_HEIGHT, np.inf, NON_HEAVY),  # the headline
     # scale conditions (occlusion policy held at the Reasonable one, documented choice)
-    "near":        (115.0, np.inf, NON_HEAVY),
-    "medium":      (45.0, 115.0, NON_HEAVY),
-    "far":         (1.0, 45.0, NON_HEAVY),
+    "near": (115.0, np.inf, NON_HEAVY),
+    "medium": (45.0, 115.0, NON_HEAVY),
+    "far": (1.0, 45.0, NON_HEAVY),
     # occlusion conditions (height held at the Reasonable threshold)
-    "occ-none":    (REASONABLE_MIN_HEIGHT, np.inf, (OCCLUSION_NONE,)),
+    "occ-none": (REASONABLE_MIN_HEIGHT, np.inf, (OCCLUSION_NONE,)),
     "occ-partial": (REASONABLE_MIN_HEIGHT, np.inf, (OCCLUSION_PARTIAL,)),
-    "occ-heavy":   (REASONABLE_MIN_HEIGHT, np.inf, (OCCLUSION_HEAVY,)),
+    "occ-heavy": (REASONABLE_MIN_HEIGHT, np.inf, (OCCLUSION_HEAVY,)),
 }
 
 
@@ -75,9 +77,7 @@ def _evaluate_with(frames, ignore_fn):
     all_labels, all_scores, n_pos = [], [], 0
     for f in frames:
         ignore = ignore_fn(f)
-        labels, scores, npos = match_frame(
-            f["det_boxes"], f["det_scores"], f["gt_boxes"], ignore
-        )
+        labels, scores, npos = match_frame(f["det_boxes"], f["det_scores"], f["gt_boxes"], ignore)
         all_labels.append(labels)
         all_scores.append(scores)
         n_pos += npos
@@ -104,11 +104,12 @@ def evaluate_subsets(frames, names=None):
     reading the number.
     """
     out = {}
-    for name in (names or SUBSETS):
+    for name in names or SUBSETS:
         min_h, max_h, occ = SUBSETS[name]
         out[name] = _evaluate_with(
             frames,
             lambda f, mn=min_h, mx=max_h, oc=occ: subset_ignore(
-                f["gt_boxes"], f["gt_classes"], f["gt_occlusion"], mn, mx, oc),
+                f["gt_boxes"], f["gt_classes"], f["gt_occlusion"], mn, mx, oc
+            ),
         )
     return out

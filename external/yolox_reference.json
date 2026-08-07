@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "upstream": "https://github.com/Megvii-BaseDetection/YOLOX",
+  "license": "Apache-2.0",
+  "audited_commit": "6ddff4824372906469a7fae2dc3206c7aa4bbaee",
+  "audited_files": [
+    "yolox/models/darknet.py",
+    "yolox/models/yolo_pafpn.py",
+    "yolox/models/yolo_head.py",
+    "yolox/models/losses.py",
+    "yolox/exp/yolox_base.py",
+    "exps/default/yolox_s.py"
+  ],
+  "local_scope": {
+    "exact_graph_for_base_ch_32": [
+      "Focus CSPDarknet stages and depths",
+      "YOLOPAFPN top-down and bottom-up graph",
+      "decoupled 128-channel head at strides 8, 16, 32",
+      "objectness and class prior probability 0.01",
+      "BatchNorm eps 0.001 and momentum 0.03",
+      "decoded-box IoU loss 1-IoU^2",
+      "current center-only SimOTA geometry radius 1.5",
+      "dynamic-k matching and IoU-weighted class targets"
+    ],
+    "intentional_study_deviations": [
+      "one pedestrian class rather than COCO classes",
+      "native 640x512 input rather than square COCO input",
+      "40 epochs from scratch rather than the official 300-epoch recipe",
+      "no mosaic, mixup, random resize, EMA, or final L1 phase",
+      "KAIST ignore-region objectness masking",
+      "confidence floor 0.001 for MR-FPPI integration",
+      "fixed raw checkpoint rather than EMA checkpoint"
+    ]
+  },
+  "claim": "YOLOX-S-derived detector graph under a study-specific training protocol; not an exact reproduction of the official YOLOX-S training recipe"
+}

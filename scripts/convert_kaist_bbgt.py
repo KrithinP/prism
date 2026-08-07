@@ -26,20 +26,20 @@ Run:
       --train-src ~/Downloads/sanitized_annotations \
       --test-src  ~/Downloads/annotations_KAIST_test_set
 """
+
 from __future__ import annotations
 
 import argparse
 import collections
 import glob
+import json
 import os
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-ROOT = Path("data/raw/kaist-cvpr15")
-
 
 def parse_bbgt(path: str):
-    """Return list of dicts {name,x,y,w,h,occ} from one bbGt file."""
+    """Return objects from one bbGt file, including its explicit ignore flag."""
     objs = []
     with open(path) as fh:
         for ln in fh:
@@ -54,7 +54,21 @@ def parse_bbgt(path: str):
                 x, y, w, h, occ = int(p[1]), int(p[2]), int(p[3]), int(p[4]), int(p[5])
             except ValueError:
                 continue
-            objs.append({"name": p[0], "x": x, "y": y, "w": w, "h": h, "occ": occ})
+            try:
+                ignore = bool(int(float(p[10]))) if len(p) > 10 else False
+            except ValueError:
+                ignore = False
+            objs.append(
+                {
+                    "name": p[0],
+                    "x": x,
+                    "y": y,
+                    "w": w,
+                    "h": h,
+                    "occ": occ,
+                    "ignore": ignore,
+                }
+            )
     return objs
 
 
@@ -62,8 +76,11 @@ def write_xml(dest: Path, fid: str, objs):
     """Write objs to dest/<fid>.xml in the schema parse_annotation() reads."""
     out = dest / f"{fid}.xml"
     out.parent.mkdir(parents=True, exist_ok=True)
-    lines = ["<annotation>", f"  <filename>{fid}</filename>",
-             "  <size><width>640</width><height>512</height><depth>3</depth></size>"]
+    lines = [
+        "<annotation>",
+        f"  <filename>{fid}</filename>",
+        "  <size><width>640</width><height>512</height><depth>3</depth></size>",
+    ]
     for o in objs:
         lines += [
             "  <object>",
@@ -90,22 +107,71 @@ def convert_tree(src: str, dest: Path, label_stats, occ_stats):
         if fid.count("/") != 2:
             continue
         objs = parse_bbgt(f)
+        converted = []
         for o in objs:
-            label_stats[o["name"]] += 1
+            scored = o["name"] == "person" and not o.get("ignore", False)
+            mapped = dict(o, name=("person" if scored else "people"))
+            converted.append(mapped)
+            label_stats[mapped["name"]] += 1
             occ_stats[o["occ"]] += 1
-        write_xml(dest, fid, objs)
+        write_xml(dest, fid, converted)
         ids.append(fid)
     return sorted(set(ids))
+
+
+def fid_from_json_filename(filename: str) -> str:
+    parts = Path(filename).parts
+    for index, part in enumerate(parts):
+        if part.startswith("set") and len(parts) >= index + 3:
+            video = parts[index + 1]
+            frame = Path(parts[-1]).stem
+            return f"{part}/{video}/{frame}"
+    raise ValueError(f"cannot derive KAIST frame id from {filename!r}")
+
+
+def convert_test_json(src: Path, dest: Path, label_stats, occ_stats) -> list[str]:
+    """Convert the pinned MLPD improved-test COCO JSON to loader XML.
+
+    The local evaluator and the pinned reference now consume the same source GT.
+    Ignored annotations are encoded as ``people`` so parse_annotation maps them
+    to class 0 (absorb-only), while scored annotations remain ``person``.
+    """
+    data = json.loads(src.read_text())
+    images = {
+        int(image["id"]): fid_from_json_filename(image.get("file_name") or image["im_name"])
+        for image in data["images"]
+    }
+    by_image: dict[int, list[dict]] = collections.defaultdict(list)
+    for annotation in data["annotations"]:
+        by_image[int(annotation["image_id"])].append(annotation)
+    ids = []
+    for image_id, fid in sorted(images.items()):
+        objects = []
+        for annotation in by_image.get(image_id, []):
+            x, y, w, h = annotation["bbox"]
+            scored = annotation.get("category_id") == 1 and not annotation.get("ignore", 0)
+            name = "person" if scored else "people"
+            occ = int(annotation.get("occlusion", 0))
+            objects.append({"name": name, "x": x, "y": y, "w": w, "h": h, "occ": occ})
+            label_stats[name] += 1
+            occ_stats[occ] += 1
+        write_xml(dest, fid, objects)
+        ids.append(fid)
+    return sorted(ids)
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--train-src", required=True, help="unpacked sanitized_annotations dir")
-    ap.add_argument("--test-src", required=True, help="unpacked improved test-set dir")
+    test = ap.add_mutually_exclusive_group(required=True)
+    test.add_argument("--test-src", help="unpacked improved test-set bbGt dir")
+    test.add_argument("--test-json", help="pinned MLPD KAIST_annotation.json (recommended)")
+    ap.add_argument("--root", default="data/raw/kaist-cvpr15")
     a = ap.parse_args()
 
-    train_dest = ROOT / "annotations-sanitized-train"
-    test_dest = ROOT / "annotations-improved-test"
+    root = Path(a.root)
+    train_dest = root / "annotations-sanitized-train"
+    test_dest = root / "annotations-improved-test"
     lstats, ostats = collections.Counter(), collections.Counter()
 
     print("converting sanitized TRAIN ...")
@@ -113,16 +179,25 @@ def main():
     print(f"  wrote {len(train_ids)} XMLs -> {train_dest}")
 
     print("converting improved TEST ...")
-    test_ids = convert_tree(os.path.expanduser(a.test_src), test_dest, lstats, ostats)
+    test_ids = (
+        convert_test_json(Path(a.test_json), test_dest, lstats, ostats)
+        if a.test_json
+        else convert_tree(os.path.expanduser(a.test_src), test_dest, lstats, ostats)
+    )
     print(f"  wrote {len(test_ids)} XMLs -> {test_dest}")
 
     # the training frame list (this REPLACES train-all-02 for training)
-    list_path = ROOT / "imageSets" / "train-sanitized.txt"
+    list_path = root / "imageSets" / "train-sanitized.txt"
+    list_path.parent.mkdir(parents=True, exist_ok=True)
     list_path.write_text("\n".join(train_ids) + "\n")
     print(f"  wrote training list ({len(train_ids)}) -> {list_path}")
 
     # cross-check test coverage against the protocol list
-    te20 = {ln.strip() for ln in (ROOT / "imageSets" / "test-all-20.txt").read_text().splitlines() if ln.strip()}
+    te20 = {
+        ln.strip()
+        for ln in (root / "imageSets" / "test-all-20.txt").read_text().splitlines()
+        if ln.strip()
+    }
     cover = len(set(test_ids) & te20)
     print(f"\n  test coverage vs test-all-20: {cover}/{len(te20)}")
     print(f"  labels: {dict(lstats)}")
@@ -130,11 +205,23 @@ def main():
 
     # round-trip verification: read one converted XML back through our own parser
     from prism.data.kaist import parse_annotation
+
     sample = next(p for p in train_dest.rglob("*.xml"))
     ann = parse_annotation(sample)
-    print(f"\n  round-trip check on {sample.relative_to(ROOT)}:")
-    print(f"    boxes={len(ann['boxes'])} classes={list(ann['classes'][:6])} "
-          f"occ={list(ann['occlusion'][:6])}")
+    if len(train_ids) != 7601:
+        raise SystemExit(f"sanitized training annotation count is {len(train_ids)}, expected 7601")
+    if set(test_ids) != te20:
+        missing = sorted(te20 - set(test_ids))
+        extra = sorted(set(test_ids) - te20)
+        raise SystemExit(
+            f"improved test IDs do not equal test-all-20: "
+            f"missing={len(missing)} {missing[:3]}, extra={len(extra)} {extra[:3]}"
+        )
+    print(f"\n  round-trip check on {sample.relative_to(root)}:")
+    print(
+        f"    boxes={len(ann['boxes'])} classes={list(ann['classes'][:6])} "
+        f"occ={list(ann['occlusion'][:6])}"
+    )
     print("\nDONE. Next: point _SPLITS at the new dirs + train-sanitized.txt, run make test.")
 
 

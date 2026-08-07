@@ -1,84 +1,89 @@
-# PRISM — Middle-Fusion RGB-Thermal Detection
+# PRISM: Controlled RGB-T Fusion on KAIST
 
-An empirical architecture study: **where and how should two sensor streams be fused inside a
-detector?** PRISM builds a two-stream YOLOX on the KAIST multispectral pedestrian benchmark,
-then ablates the fusion design — fusion *stage*, fusion *operator*, and robustness to
-*misalignment* — and reports proper metrics against the published literature.
+PRISM is a validation-first architecture study of visible/thermal pedestrian
+detection. It compares unimodal YOLOX-S-derived baselines, literal early and
+middle fusion graphs, late probabilistic fusion, twelve feature
+operators/controls, and controlled modality degradation.
 
-The question it exists to answer: **does middle fusion actually earn its place over a good
-single-modality detector or a simple late-fusion ensemble** — and if so, which fusion operator,
-at what compute cost, and how gracefully does it fail when the two streams stop lining up?
+The corrected study has not been trained in this checkout. Earlier 16-epoch
+test-set numbers are quarantined as exploratory and must not appear as final
+evidence.
 
-## Status
+## What is ready
 
-**Phase 1 complete; Phase 2 (fusion-depth sweep) running.** All models trained **from scratch**
-(no pretraining), lr 0.01, 16 epochs, **5 seeds** each, evaluated on the improved-test annotations.
-Absolute numbers sit in the from-scratch regime (~35% vs ~19% for pretrained methods); the study's
-claims are *internal deltas*, which are regime-independent. Full ledger in `docs/RESULTS.md`; the
-build is narrated chapter-by-chapter in `docs/textbook/`.
+- canonical KAIST evaluator and differential parity harness;
+- official-test release firewall and hashed manifests;
+- one-command KAIST download, conversion, split, and audit;
+- corrected YOLOX-derived graph/loss/SimOTA/BatchNorm semantics;
+- KAIST ignore-region masking during training;
+- early, true one-shot, multi-scale, and late fusion;
+- capacity, duplicated-input, and nested-at-initialization controls;
+- ten mechanism operators plus two exact parameter-matched concat controls;
+- five-seed validation-only matrix runner and frozen winner handoff;
+- durable attempt-level provenance with exact commands, environment/config/data
+  hashes, non-overwriting logs, atomic checkpoints, and per-frame detections;
+- modality-dropout/misalignment robustness arms;
+- intervention, representation, targeted attribution, sequence-bootstrap, and
+  profiling scripts;
+- one fail-closed post-hoc runner with predeclared model/seed coverage.
 
-| Model | MR⁻² All | Day | Night |
-|---|---|---|---|
-| thermal-only | 36.1 ± 1.3 | 43.9 | 20.6 |
-| RGB-only | 52.5 ± 1.5 | 46.3 | 65.9 |
-| **fusion (F-cat-345)** | **27.7 ± 1.9** | **32.7 ± 2.3** | **17.5 ± 1.4** |
+## Protocol
 
-Fusion beats the better single camera by **−8.4 / −11.2 / −3.1** (All/Day/Night); All and Day clear
-2σ decisively, Night is borderline. Controls rule out the two usual false positives: it beats
-*both* single cameras in daytime (genuine cross-modal benefit, not a single-modality collapse), and
-a **parameter-matched** single-stream control (thermal widened to fusion's 14M params) stays at
-36.1 — so the win is from *combining cameras*, not model size. RGB's night-blindness (65.9 vs 20.6)
-confirms the multispectral premise.
-
-## The dataset
-
-[KAIST Multispectral Pedestrian Detection Benchmark](https://soonminhwang.github.io/rgbt-ped-detection/)
-(Hwang et al., CVPR 2015). 95k color-thermal pairs, 640×480, 20 Hz, captured from a vehicle
-through a **beam splitter**.
-
-The alignment story is the whole reason this project is interesting, and it has two halves:
-
-- **By design, KAIST is aligned.** The beam splitter makes the cameras co-axial (no large-baseline
-  parallax) and the pairs are hardware-captured at a single 20 Hz rate (no frame-rate skew).
-- **In practice, it is only *weakly* aligned.** AR-CNN (Zhang et al., ICCV 2019) showed the same
-  pedestrian occupies different pixel positions in RGB vs thermal, and released **KAIST-Paired**
-  per-modality annotations to quantify it. Essentially the entire published literature trains
-  through this residual shift without mentioning it.
-
-So PRISM treats misalignment robustness as a first-class ablation axis, with two instruments:
-**measure** the shift that is already in the data (KAIST-Paired), and **inject** controlled extra
-shift/scale/temporal skew to sweep the axis. Fusion operators that assume exact pixel
-correspondence should degrade; ones that pool or gate should not.
-
-Evaluation is **log-average miss rate (MR⁻²)** over FPPI ∈ [10⁻², 10⁰] on the *reasonable*
-subset, reported All / Day / Night — not mAP. Uses the sanitized train + improved test
-annotations, without which results are not comparable to any published table.
-
-## Quickstart
-
-```bash
-uv venv --python 3.11 && source .venv/bin/activate
-uv pip install -e .
-cp .env.example .env.local   # then fill in WANDB_API_KEY
+```text
+train labels:     MSDS sanitized, 7,601 pairs
+selection:        sequence-disjoint train-cv / val-cv
+final test:       improved test annotations, 2,252 pairs
+input:            640x512
+training:         from scratch, exactly 40 epochs
+seeds:            0,1,2,3,4
+primary metric:   validation Reasonable All MR^-2
+test access:      frozen manifest only
 ```
 
-GPU note: this repo targets an RTX 5070 Ti Laptop (Blackwell, `sm_120`). That requires PyTorch
-built against **CUDA 12.8 or newer** — earlier wheels fail with "no kernel image is available".
+The base is a **YOLOX-S-derived detector graph under a study-specific recipe**,
+not an exact reproduction of the official 300-epoch YOLOX-S training recipe.
 
-## Definition of done
+## Setup
 
-Nothing is "working" until:
-1. The end-to-end slice runs: one KAIST image pair → two-stream model → detections → an MR number.
-2. Single-modality baselines (RGB-only, thermal-only) are trained and match published ranges.
-3. Any fusion variant is reported against *both* baselines, on the same seeds, with params/FLOPs.
-   A fusion model that does not beat the better single modality is a **negative result, reported
-   as such** — not a bug to be hidden.
+```sh
+uv sync --extra dev --python 3.11
+source .venv/bin/activate
 
-## Layout
+make prepare-kaist
+make certify-evaluator
+make test
+make preflight
+make data-stats
+```
 
-- `docs/LITERATURE.md` — the paper trail, the fusion-operator taxonomy, the evaluation protocol
-- `docs/CURRICULUM.md` — the ground-up study plan behind this work
-- `docs/textbook/` — the LaTeX textbook written as the project goes
-- `src/prism/` — model, data, fusion ops, eval
-- `configs/` — one config per ablation cell
-- `scripts/` — data prep, training, evaluation entry points
+The PyTorch source is configured for CUDA 12.8. Verify the wheel supports the
+training GPU before starting the matrix.
+
+## Run
+
+```sh
+make study-all
+```
+
+This runs the stages serially because each winner is frozen before the next
+block starts. It finishes with profiling, five-seed interventions,
+representation dumps, quantitative Grad-CAM/Integrated-Gradients analysis, and
+paired sequence bootstraps. Artifacts go under `outputs/`.
+
+## Read first
+
+- [EXPLANATION.md](EXPLANATION.md): architecture, equations, matrix, exact commands
+- [docs/LITERATURE.md](docs/LITERATURE.md): extended primary-source review
+- [docs/EXPERIMENT_PLAN.md](docs/EXPERIMENT_PLAN.md): frozen execution plan
+- [TODO.md](TODO.md): remaining gates and evidence requirements
+- [data/README.md](data/README.md): exact dataset sources and layout
+
+## Core claim rule
+
+A fused model does not count as a win because it beats one weak modality. It must
+be evaluated against both unimodal models, width controls, duplicated-input
+branches, nested-at-initialization controls, early/late fusion, ProbEn, five training
+seeds, compute, and degradation behavior.
+
+Attention maps, gates, CKA, and effective rank are diagnostics. Causal claims
+about model reliance require fixed-weight input interventions and uncertainty.

@@ -2,6 +2,7 @@
 name = "prism"
 version = "0.1.0"
 description = "Middle-fusion RGB-thermal detection: an empirical architecture study on KAIST"
+readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
     # Blackwell (sm_120) needs CUDA 12.8+ wheels; anything older dies at runtime with
@@ -9,22 +10,15 @@ dependencies = [
     "torch>=2.11",
     "torchvision>=0.26",
     "numpy>=1.26",
-    "opencv-python>=4.10",
-    "pillow>=10.0",
+    "opencv-python-headless>=4.10",
     "pyyaml>=6.0",
     "scipy>=1.13",
     "matplotlib>=3.8",
-    "tqdm>=4.66",
-    "loguru>=0.7",
-    "tabulate>=0.9",
-    "pycocotools>=2.0.8",
-    "wandb>=0.17",
-    "thop>=0.1.1",           # params / FLOPs accounting — a reported column, not an afterthought
-    "python-dotenv>=1.0",
+    "gdown>=5.2",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.5", "ipykernel>=6.29"]
+dev = ["pytest>=8.0", "ruff>=0.5"]
 
 [build-system]
 requires = ["hatchling"]
@@ -35,6 +29,12 @@ packages = ["src/prism"]
 
 [tool.ruff]
 line-length = 100
+# The pinned MLPD evaluator is third-party reference code. Reformatting it would
+# invalidate the source/hash provenance used by the parity certificate.
+exclude = ["external"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 # Pull torch/torchvision from the CUDA 12.8 index, not PyPI. Without this, a fresh
 # `uv pip install -e .` silently grabs a default-CUDA wheel that cannot run on sm_120.

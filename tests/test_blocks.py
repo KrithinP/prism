@@ -1,8 +1,8 @@
-
 """Blocks must preserve or halve spatial size exactly as expected."""
+
 import torch
 
-from prism.models.blocks import ConvBNAct, Bottleneck, CSPLayer, SPPBottleneck
+from prism.models.blocks import Bottleneck, ConvBNAct, CSPLayer, SPPBottleneck
 
 
 def test_conv_keeps_size_and_halves_on_stride2():

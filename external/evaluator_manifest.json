@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "generator": "scripts/pin_mlpd_eval.py",
+  "repository": "https://github.com/sejong-rcv/MLPD-Multi-Label-Pedestrian-Detection.git",
+  "commit_sha": "8e583929a97b9f959634efa69174435ad0252a57",
+  "files": {
+    "evaluation_script/KAIST_annotation.json": "07f525a4a28ebf96b026c367d9222115896671f9512a29b441307efa4d9a525d",
+    "evaluation_script/KASIT_BENCHMARK.jpg": "055011fd6c2948798bb93406f7656228d9b2f94299bde41e059c73ed79570670",
+    "evaluation_script/README.md": "ca4b60e1782874ca2310bad1b0421645557c37ef44670a3d380a63f3d89c7399",
+    "evaluation_script/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "evaluation_script/coco.py": "d0897765de887618a5e83d98430ad94737af144650d256b8c4390b5363d00668",
+    "evaluation_script/cocoeval.py": "7a48abae6e9ccf70824d4e19da59cc91689c97a80a6d6f760f67aa0ebb9f38cf",
+    "evaluation_script/evaluation_script.py": "97a38624e5c583748fa5ef93f3136ded2c1874f0906a68c1f4caa32e09ab6ff2",
+    "evaluation_script/state_of_arts/ARCNN_result.txt": "7747a89a1d9aa8b2a84ceced87fc0e3d711b0b7f9f24fb5ca6d749ff7199440d",
+    "evaluation_script/state_of_arts/CIAN_result.txt": "795cefe0b2377867e4f317768a7fe192694ff91c5c91f9eae85422473a4bf2e4",
+    "evaluation_script/state_of_arts/MBNet_result.txt": "c75332422a66abb4f8f381375b9101f024a119e52456ee4d23b476c9679cb9db",
+    "evaluation_script/state_of_arts/MLPD_result.json": "238b692e4951b30fdf75b133606671f9efd93b08fb0a3fd3e5c0e1a351a25245",
+    "evaluation_script/state_of_arts/MLPD_result.txt": "1d604a1f7ece32cd52f9ca5d6e7124b8d7d6e5a5b0b44358c506ce641e1304d4",
+    "evaluation_script/state_of_arts/MSDS-RCNN_result.txt": "ef57aa4657eaab6e2265c1840fec685498cca19f21326788bb3dc1092e83b7c8"
+  },
+  "bundled_reference_results": {
+    "CIAN": [
+      14.12,
+      14.77,
+      11.13
+    ],
+    "MSDS-RCNN": [
+      11.34,
+      10.53,
+      12.94
+    ],
+    "AR-CNN": [
+      9.34,
+      9.94,
+      8.38
+    ],
+    "MBNet": [
+      8.13,
+      8.28,
+      7.86
+    ],
+    "MLPD-VGG16": [
+      7.58,
+      7.95,
+      6.95
+    ],
+    "MLPD-ResNet50": [
+      7.61,
+      8.36,
+      6.35
+    ]
+  }
+}
