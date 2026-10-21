@@ -11,6 +11,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import math
 import os
 import platform
 import socket
@@ -109,11 +110,31 @@ def verify_artifact_record(record: dict, *, label: str = "artifact") -> Path:
     return path
 
 
+def _finite_or_null(value):
+    """Recursively replace non-finite floats (NaN/Inf) with None.
+
+    Keeps a provenance row strictly-valid JSON no matter what telemetry it
+    carries. Training diagnostics such as the pre-clip gradient L2 are
+    legitimately Inf on an AMP gradient-overflow step (the GradScaler then skips
+    that step) and must never abort a multi-hour run. A genuinely non-finite
+    *loss* is caught separately by the Diverged guard in train.py, so nulling
+    telemetry here cannot hide a real divergence -- an explicit ``null`` in the
+    ledger still records that a non-finite value occurred.
+    """
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: _finite_or_null(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_finite_or_null(item) for item in value]
+    return value
+
+
 def append_jsonl(path: str | Path, row: dict, *, durable: bool = True) -> None:
     """Append one complete JSON object without inter-process interleaving."""
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(row, allow_nan=False, separators=(",", ":")) + "\n"
+    payload = json.dumps(_finite_or_null(row), allow_nan=False, separators=(",", ":")) + "\n"
     with destination.open("a", encoding="utf-8") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:

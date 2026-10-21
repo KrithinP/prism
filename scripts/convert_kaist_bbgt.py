@@ -38,6 +38,30 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 
+IMG_W, IMG_H = 640, 512
+
+
+def clip_object(o, stats):
+    """Clip a box to the image, dropping it if no area survives.
+
+    Real KAIST ships pedestrians truncated by the frame edge (x+w>640, x<0) and a
+    small number of degenerate (w<=0/h<=0) boxes. The standard, evaluator-consistent
+    handling is clip-then-drop: keep the visible part of an edge-truncated box, and
+    discard a box that has no area left. Returns a new object dict with clipped
+    x/y/w/h, or ``None`` to drop it. ``stats`` counts what happened.
+    """
+    x1 = max(0, min(o["x"], IMG_W))
+    y1 = max(0, min(o["y"], IMG_H))
+    x2 = max(0, min(o["x"] + o["w"], IMG_W))
+    y2 = max(0, min(o["y"] + o["h"], IMG_H))
+    if x2 - x1 <= 0 or y2 - y1 <= 0:
+        stats["dropped"] += 1
+        return None
+    if (x1, y1, x2 - x1, y2 - y1) != (o["x"], o["y"], o["w"], o["h"]):
+        stats["clipped"] += 1
+    return dict(o, x=x1, y=y1, w=x2 - x1, h=y2 - y1)
+
+
 def parse_bbgt(path: str):
     """Return objects from one bbGt file, including its explicit ignore flag."""
     objs = []
@@ -100,7 +124,7 @@ def fid_from_name(txt_path: str) -> str:
     return base.replace("_", "/")
 
 
-def convert_tree(src: str, dest: Path, label_stats, occ_stats):
+def convert_tree(src: str, dest: Path, label_stats, occ_stats, clip_stats):
     ids = []
     for f in sorted(glob.glob(f"{src}/**/set*.txt", recursive=True)):
         fid = fid_from_name(f)
@@ -110,7 +134,9 @@ def convert_tree(src: str, dest: Path, label_stats, occ_stats):
         converted = []
         for o in objs:
             scored = o["name"] == "person" and not o.get("ignore", False)
-            mapped = dict(o, name=("person" if scored else "people"))
+            mapped = clip_object(dict(o, name=("person" if scored else "people")), clip_stats)
+            if mapped is None:
+                continue
             converted.append(mapped)
             label_stats[mapped["name"]] += 1
             occ_stats[o["occ"]] += 1
@@ -129,7 +155,7 @@ def fid_from_json_filename(filename: str) -> str:
     raise ValueError(f"cannot derive KAIST frame id from {filename!r}")
 
 
-def convert_test_json(src: Path, dest: Path, label_stats, occ_stats) -> list[str]:
+def convert_test_json(src: Path, dest: Path, label_stats, occ_stats, clip_stats) -> list[str]:
     """Convert the pinned MLPD improved-test COCO JSON to loader XML.
 
     The local evaluator and the pinned reference now consume the same source GT.
@@ -152,7 +178,10 @@ def convert_test_json(src: Path, dest: Path, label_stats, occ_stats) -> list[str
             scored = annotation.get("category_id") == 1 and not annotation.get("ignore", 0)
             name = "person" if scored else "people"
             occ = int(annotation.get("occlusion", 0))
-            objects.append({"name": name, "x": x, "y": y, "w": w, "h": h, "occ": occ})
+            clipped = clip_object({"name": name, "x": x, "y": y, "w": w, "h": h, "occ": occ}, clip_stats)
+            if clipped is None:
+                continue
+            objects.append(clipped)
             label_stats[name] += 1
             occ_stats[occ] += 1
         write_xml(dest, fid, objects)
@@ -173,18 +202,21 @@ def main():
     train_dest = root / "annotations-sanitized-train"
     test_dest = root / "annotations-improved-test"
     lstats, ostats = collections.Counter(), collections.Counter()
+    train_clip, test_clip = collections.Counter(), collections.Counter()
 
     print("converting sanitized TRAIN ...")
-    train_ids = convert_tree(os.path.expanduser(a.train_src), train_dest, lstats, ostats)
+    train_ids = convert_tree(os.path.expanduser(a.train_src), train_dest, lstats, ostats, train_clip)
     print(f"  wrote {len(train_ids)} XMLs -> {train_dest}")
+    print(f"  boxes clipped to image bounds: {train_clip['clipped']}, degenerate dropped: {train_clip['dropped']}")
 
     print("converting improved TEST ...")
     test_ids = (
-        convert_test_json(Path(a.test_json), test_dest, lstats, ostats)
+        convert_test_json(Path(a.test_json), test_dest, lstats, ostats, test_clip)
         if a.test_json
-        else convert_tree(os.path.expanduser(a.test_src), test_dest, lstats, ostats)
+        else convert_tree(os.path.expanduser(a.test_src), test_dest, lstats, ostats, test_clip)
     )
     print(f"  wrote {len(test_ids)} XMLs -> {test_dest}")
+    print(f"  boxes clipped to image bounds: {test_clip['clipped']}, degenerate dropped: {test_clip['dropped']}")
 
     # the training frame list (this REPLACES train-all-02 for training)
     list_path = root / "imageSets" / "train-sanitized.txt"

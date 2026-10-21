@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "split_policy": "sequence-disjoint (set/video granularity)",
+  "seed": 20260730,
+  "target_val_fraction": 0.15,
+  "realized_val_fraction": 0.15142744375740033,
+  "train_frames": 6450,
+  "val_frames": 1151,
+  "source": {
+    "frames": 7601,
+    "sha256": "1f2264db01c2ded29e5ef939f7b1618447857ebc30ed6a9f129ddc791ee2d0ec"
+  },
+  "train": {
+    "frames": 6450,
+    "videos": 21,
+    "sha256": "30d59232965b9d0a4d71feffe4b1e82316d48d2caad477d90d79f380aedf28c8"
+  },
+  "val": {
+    "frames": 1151,
+    "videos": 4,
+    "sha256": "365d137f36d643a95f6e83f7b2f45d6bc801cdb1af0d4351cff6002b80f36e77"
+  }
+}
